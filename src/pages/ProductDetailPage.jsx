@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
@@ -21,6 +21,7 @@ import api, {
   getFlowerImage,
   getMergedProductReviews,
   syncProductReviewsFromCloud,
+  syncProductOverridesFromCloud,
   saveProductReview,
 } from '../services/api';
 import { useApp } from '../context/AppContext';
@@ -84,7 +85,6 @@ export default function ProductDetailPage() {
 
   const [product, setProduct] = useState(null);
   const [recommendations, setRecommendations] = useState([]);
-  const [serverReviews, setServerReviews] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [wishlistIds, setWishlistIds] = useState(() => readWishlist());
   const [qty, setQty] = useState(1);
@@ -93,6 +93,9 @@ export default function ProductDetailPage() {
   const [loading, setLoading] = useState(true);
   const [buyingNow, setBuyingNow] = useState(false);
 
+  // Dùng ref để lưu danh sách đánh giá từ server, tránh tạo vòng lặp re-render
+  const serverReviewsRef = useRef([]);
+
   const normalizeScore = (raw) => {
     if (typeof raw !== 'number' || Number.isNaN(raw)) return null;
     if (raw > 1 && raw <= 100) return Number((raw / 100).toFixed(2));
@@ -100,126 +103,132 @@ export default function ProductDetailPage() {
     return null;
   };
 
-  const refreshMergedReviews = useCallback(
-    (srvList = serverReviews) => {
-      setReviews(getMergedProductReviews(id, srvList));
+  const loadDetail = useCallback(
+    async (silent = false) => {
+      try {
+        if (!silent) setLoading(true);
+
+        const [spRes, recRes, revRes, allSpRes] = await Promise.all([
+          api.get(`/SanPham/${id}`),
+          api.get(`/SanPham/${id}/recommendations`).catch(() => ({ data: {} })),
+          api.get(`/DanhGia/product/${id}`).catch(() => ({ data: [] })),
+          api.get('/SanPham').catch(() => ({ data: [] })),
+        ]);
+
+        const currentSp = spRes.data;
+        setProduct(currentSp);
+        if (!silent) setQty(1);
+
+        const allProducts = Array.isArray(allSpRes.data)
+          ? allSpRes.data
+          : allSpRes.data?.items || [];
+
+        const recData = recRes.data || {};
+        let recList =
+          recData.sanPhamGoiY ||
+          recData.danhSachGoiY ||
+          recData.sanPhamTuongTu ||
+          recData.goiY ||
+          recData.recommendations ||
+          recData.items ||
+          (Array.isArray(recData) ? recData : []);
+
+        if (!Array.isArray(recList) || recList.length === 0) {
+          const firstArrayKey = Object.keys(recData).find((k) => Array.isArray(recData[k]));
+          if (firstArrayKey) {
+            recList = recData[firstArrayKey];
+          }
+        }
+
+        const sourceLabel = recData.nguonGoiY || 'MachineLearning_Smart_AI';
+
+        recList = (recList || []).map((item) => {
+          const rawScore =
+            item.similarityScore ??
+            item.doTuongDong ??
+            item.diemTuongDong ??
+            item.score ??
+            null;
+          return {
+            ...item,
+            similarityScore: normalizeScore(rawScore),
+          };
+        });
+
+        const hasValidScores =
+          recList.length > 0 && recList.every((x) => typeof x.similarityScore === 'number');
+
+        if (!hasValidScores || sourceLabel.toLowerCase().includes('fallback')) {
+          try {
+            const aiRes = await axios.get(`${AI_BASE_URL}/recommend/${id}`, { timeout: 4000 });
+            const details =
+              aiRes.data?.details ||
+              aiRes.data?.recommendations ||
+              (Array.isArray(aiRes.data) ? aiRes.data : []);
+            if (details.length > 0) {
+              recList = details
+                .map((d) => {
+                  const spId = d.maSanPham ?? d.id;
+                  const full = allProducts.find((p) => p.maSanPham === spId);
+                  const score = normalizeScore(
+                    d.similarityScore ?? d.score ?? d.doTuongDong ?? 0.75
+                  );
+                  return full
+                    ? { ...full, similarityScore: score }
+                    : { ...d, maSanPham: spId, similarityScore: score };
+                })
+                .filter(Boolean);
+            }
+          } catch {
+            // Dùng gợi ý dự phòng
+          }
+        }
+
+        if ((!recList || recList.length === 0) && allProducts.length > 1) {
+          recList = allProducts.filter((p) => p.maSanPham !== Number(id)).slice(0, 4);
+        }
+
+        recList = (recList || []).map((item, idx) => {
+          if (typeof item.similarityScore === 'number') return item;
+          let calcScore = 0.64 - idx * 0.04;
+          if (currentSp?.tongMauSac && item.tongMauSac === currentSp.tongMauSac) {
+            calcScore += 0.22;
+          }
+          if (currentSp?.maDanhMuc && item.maDanhMuc === currentSp.maDanhMuc) {
+            calcScore += 0.1;
+          }
+          const clamped = Math.min(0.96, Math.max(0.45, Number(calcScore.toFixed(2))));
+          return { ...item, similarityScore: clamped };
+        });
+
+        setRecommendations(recList);
+
+        const rawSrvReviews = Array.isArray(revRes.data) ? revRes.data : [];
+        serverReviewsRef.current = rawSrvReviews;
+        setReviews(getMergedProductReviews(id, rawSrvReviews));
+      } finally {
+        if (!silent) setLoading(false);
+      }
     },
-    [id, serverReviews]
+    [id]
   );
 
-  const loadDetail = useCallback(async () => {
-    try {
-      setLoading(true);
-      await syncProductReviewsFromCloud();
-
-      const [spRes, recRes, revRes, allSpRes] = await Promise.all([
-        api.get(`/SanPham/${id}`),
-        api.get(`/SanPham/${id}/recommendations`).catch(() => ({ data: {} })),
-        api.get(`/DanhGia/product/${id}`).catch(() => ({ data: [] })),
-        api.get('/SanPham').catch(() => ({ data: [] })),
-      ]);
-      const currentSp = spRes.data;
-      setProduct(currentSp);
-      setQty(1);
-
-      const allProducts = Array.isArray(allSpRes.data)
-        ? allSpRes.data
-        : allSpRes.data?.items || [];
-
-      const recData = recRes.data || {};
-      let recList =
-        recData.sanPhamGoiY ||
-        recData.danhSachGoiY ||
-        recData.sanPhamTuongTu ||
-        recData.goiY ||
-        recData.recommendations ||
-        recData.items ||
-        (Array.isArray(recData) ? recData : []);
-
-      if (!Array.isArray(recList) || recList.length === 0) {
-        const firstArrayKey = Object.keys(recData).find((k) => Array.isArray(recData[k]));
-        if (firstArrayKey) {
-          recList = recData[firstArrayKey];
-        }
-      }
-
-      const sourceLabel = recData.nguonGoiY || 'MachineLearning_Smart_AI';
-
-      recList = (recList || []).map((item) => {
-        const rawScore =
-          item.similarityScore ??
-          item.doTuongDong ??
-          item.diemTuongDong ??
-          item.score ??
-          null;
-        return {
-          ...item,
-          similarityScore: normalizeScore(rawScore),
-        };
-      });
-
-      const hasValidScores =
-        recList.length > 0 && recList.every((x) => typeof x.similarityScore === 'number');
-
-      if (!hasValidScores || sourceLabel.toLowerCase().includes('fallback')) {
-        try {
-          const aiRes = await axios.get(`${AI_BASE_URL}/recommend/${id}`);
-          const details =
-            aiRes.data?.details ||
-            aiRes.data?.recommendations ||
-            (Array.isArray(aiRes.data) ? aiRes.data : []);
-          if (details.length > 0) {
-            recList = details
-              .map((d) => {
-                const spId = d.maSanPham ?? d.id;
-                const full = allProducts.find((p) => p.maSanPham === spId);
-                const score = normalizeScore(
-                  d.similarityScore ?? d.score ?? d.doTuongDong ?? 0.75
-                );
-                return full
-                  ? { ...full, similarityScore: score }
-                  : { ...d, maSanPham: spId, similarityScore: score };
-              })
-              .filter(Boolean);
-          }
-        } catch {
-          // Dùng gợi ý dự phòng
-        }
-      }
-
-      if ((!recList || recList.length === 0) && allProducts.length > 1) {
-        recList = allProducts.filter((p) => p.maSanPham !== Number(id)).slice(0, 4);
-      }
-
-      recList = (recList || []).map((item, idx) => {
-        if (typeof item.similarityScore === 'number') return item;
-        let calcScore = 0.64 - idx * 0.04;
-        if (currentSp?.tongMauSac && item.tongMauSac === currentSp.tongMauSac) {
-          calcScore += 0.22;
-        }
-        if (currentSp?.maDanhMuc && item.maDanhMuc === currentSp.maDanhMuc) {
-          calcScore += 0.1;
-        }
-        const clamped = Math.min(0.96, Math.max(0.45, Number(calcScore.toFixed(2))));
-        return { ...item, similarityScore: clamped };
-      });
-
-      setRecommendations(recList);
-
-      const rawSrvReviews = Array.isArray(revRes.data) ? revRes.data : [];
-      setServerReviews(rawSrvReviews);
-      setReviews(getMergedProductReviews(id, rawSrvReviews));
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
-
+  // Chỉ chạy 1 lần khi mở trang hoặc đổi mã sản phẩm
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    loadDetail();
+    loadDetail(false);
 
-    const handleProductSync = () => loadDetail();
-    const handleReviewsSync = () => refreshMergedReviews();
+    // Đồng bộ ngầm cloud sau khi trang đã hiển thị, không làm nhấp nháy màn hình
+    syncProductOverridesFromCloud().catch(() => {});
+    syncProductReviewsFromCloud().catch(() => {});
+  }, [id, loadDetail]);
+
+  // Lắng nghe cập nhật từ tab khác hoặc sau khi gửi đánh giá mới
+  useEffect(() => {
+    const handleProductSync = () => loadDetail(true);
+    const handleReviewsSync = () => {
+      setReviews(getMergedProductReviews(id, serverReviewsRef.current));
+    };
 
     window.addEventListener('thx_products_updated', handleProductSync);
     window.addEventListener('thx_reviews_updated', handleReviewsSync);
@@ -227,7 +236,7 @@ export default function ProductDetailPage() {
       window.removeEventListener('thx_products_updated', handleProductSync);
       window.removeEventListener('thx_reviews_updated', handleReviewsSync);
     };
-  }, [loadDetail, refreshMergedReviews]);
+  }, [id, loadDetail]);
 
   const toggleWishlist = () => {
     if (!product?.maSanPham) return;
@@ -280,7 +289,7 @@ export default function ProductDetailPage() {
 
     showToast('Cảm ơn bạn! Đánh giá đã được lưu và hiển thị công khai.');
     setComment('');
-    refreshMergedReviews();
+    setReviews(getMergedProductReviews(id, serverReviewsRef.current));
   };
 
   if (loading) {
