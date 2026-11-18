@@ -78,7 +78,7 @@ const ADMIN_QUICK_REPLIES = [
   'Đơn hàng của bạn đang được thợ hoa chuẩn bị và sẽ giao đúng khung giờ đã đặt ạ!',
 ];
 
-function compressImageFile(file, maxSize = 520, quality = 0.75) {
+function compressImageFile(file, maxSize = 360, quality = 0.68) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -196,7 +196,7 @@ function normalizeAdminOrderStatus(rawStatus = '', isPickup = false) {
 export default function AdminDashboard() {
   const { user, showToast } = useApp();
   const [activeTab, setActiveTab] = useState('orders');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [training, setTraining] = useState(false);
   const [apiError, setApiError] = useState('');
   const [hotlineInput, setHotlineInput] = useState(() => getHotlineNumber());
@@ -271,9 +271,8 @@ export default function AdminDashboard() {
     };
   }, [syncChats]);
 
-  // Tự động đồng bộ tin nhắn & trạng thái đơn hàng 2 chiều qua đám mây
   useEffect(() => {
-    const intervalMs = activeTab === 'messages' ? 3000 : 5000;
+    const intervalMs = activeTab === 'messages' ? 4000 : 8000;
     const timer = setInterval(() => {
       syncChatsFromCloud().then(() => syncChats());
       syncOrderMetaFromCloud().then((latest) => setOrderMetaMap(latest));
@@ -305,50 +304,79 @@ export default function AdminDashboard() {
     setOrderMetaMap(updated);
   };
 
-  const fetchWithRetry = async (url, retries = 1) => {
-    try {
-      return await api.get(url, { timeout: 20000 });
-    } catch (err) {
-      if (retries > 0) {
-        await new Promise((r) => setTimeout(r, 1500));
-        return fetchWithRetry(url, retries - 1);
-      }
-      throw err;
-    }
-  };
+  const buildFallbackForecast = useCallback((spList) => {
+    setForecasts((prev) => {
+      if (prev.length > 0) return prev;
+      return spList.slice(0, 12).map((p, idx) => {
+        const predicted = Math.max(18, 45 - idx * 2);
+        const needImport = Math.max(0, predicted - (p.soLuongTon ?? 15) + 10);
+        return {
+          maSanPham: p.maSanPham,
+          tenSanPham: p.tenSanPham,
+          soLuongTon: p.soLuongTon ?? 15,
+          duBaoThangToi: predicted,
+          deXuatNhap: needImport,
+        };
+      });
+    });
+  }, []);
 
   const loadAllData = useCallback(async () => {
+    setLoading(true);
+    setApiError('');
+
+    // 1. Nạp ngay dữ liệu lưu tạm gần nhất để màn hình không bao giờ bị trống
     try {
-      setLoading(true);
-      setApiError('');
+      const rawCache = localStorage.getItem('thx_admin_fast_cache');
+      if (rawCache) {
+        const cached = JSON.parse(rawCache);
+        if (Array.isArray(cached.products) && cached.products.length > 0) {
+          setProducts(cached.products);
+          const pMap = {};
+          cached.products.forEach((p) => {
+            pMap[p.maSanPham] = p;
+          });
+          setProductMap(pMap);
+          buildFallbackForecast(cached.products);
+        }
+        if (Array.isArray(cached.orders) && cached.orders.length > 0) {
+          setOrders(cached.orders);
+        }
+      }
+    } catch {
+      // Bỏ qua lỗi đọc cache
+    }
 
-      // Đồng bộ lần lượt trạng thái đơn hàng và hình ảnh sản phẩm với đám mây
-      const syncedMeta = await syncOrderMetaFromCloud();
-      setOrderMetaMap(syncedMeta);
-      await syncProductOverridesFromCloud();
+    // 2. Đồng bộ đám mây chạy nền (không chặn giao diện)
+    syncOrderMetaFromCloud().then((latest) => setOrderMetaMap(latest));
+    syncProductOverridesFromCloud().then(() => {
+      setProducts((prev) => [...prev]);
+    });
 
-      const [spResult, ordResult] = await Promise.allSettled([
-        fetchWithRetry('/SanPham', 1),
-        fetchWithRetry('/DonHang', 1),
-      ]);
-
-      let spList = [];
-      if (spResult.status === 'fulfilled') {
-        const d = spResult.value.data;
-        spList = Array.isArray(d) ? d : d?.items || [];
+    // 3. Tải danh sách sản phẩm độc lập (nhanh)
+    const loadProductsTask = api
+      .get('/SanPham', { timeout: 8000 })
+      .then((res) => {
+        const d = res.data;
+        const spList = Array.isArray(d) ? d : d?.items || [];
         setProducts(spList);
         const pMap = {};
         spList.forEach((p) => {
           pMap[p.maSanPham] = p;
         });
         setProductMap(pMap);
-      }
+        buildFallbackForecast(spList);
+        return spList;
+      })
+      .catch(() => []);
 
-      let ordList = [];
-      if (ordResult.status === 'fulfilled') {
+    // 4. Tải danh sách đơn hàng độc lập (timeout 8 giây để không bị treo)
+    const loadOrdersTask = api
+      .get('/DonHang', { timeout: 8000 })
+      .then(async (res) => {
         setApiError('');
-        const d = ordResult.value.data;
-        ordList = Array.isArray(d) ? d : d?.items || [];
+        const d = res.data;
+        let ordList = Array.isArray(d) ? d : d?.items || [];
         ordList.sort((a, b) => (b.maDonHang || 0) - (a.maDonHang || 0));
 
         const topEnriched = await Promise.all(
@@ -357,7 +385,7 @@ export default function AdminDashboard() {
               ord.trangThai || ord.trangThaiDonHang || ord.trangThaiDon || ord.status;
             if (hasStatus) return ord;
             try {
-              const dRes = await api.get(`/DonHang/${ord.maDonHang}`, { timeout: 4000 });
+              const dRes = await api.get(`/DonHang/${ord.maDonHang}`, { timeout: 3000 });
               return { ...ord, ...(dRes.data || {}) };
             } catch {
               return ord;
@@ -366,78 +394,75 @@ export default function AdminDashboard() {
         );
         ordList = [...topEnriched, ...ordList.slice(5)];
         setOrders(ordList);
-      }
-
-      if (spResult.status === 'rejected' && ordResult.status === 'rejected') {
-        const reason = spResult.reason || ordResult.reason;
-        if (!reason?.response) {
+        return ordList;
+      })
+      .catch((err) => {
+        const status = err?.response?.status;
+        if (status === 401 || status === 403) {
           setApiError(
-            `Không thể kết nối tới máy chủ Backend (${API_BASE_URL}). Hãy kiểm tra máy chủ đang hoạt động và thử tải lại.`
+            'Phiên đăng nhập Admin đã hết hạn. Vui lòng bấm Đăng xuất ở góc phải và đăng nhập lại.'
           );
         } else {
           setApiError(
-            `Máy chủ Backend trả về lỗi HTTP ${reason.response.status}. Vui lòng kiểm tra kết nối SQL Server.`
+            'Danh sách đơn hàng từ máy chủ đang phản hồi chậm. Dữ liệu sẽ tự cập nhật khi bấm Làm mới.'
           );
         }
-      } else if (ordResult.status === 'rejected') {
-        const status = ordResult.reason?.response?.status;
-        setApiError(
-          status === 401 || status === 403
-            ? 'Phiên đăng nhập Admin đã hết hạn. Vui lòng bấm Đăng xuất và đăng nhập lại.'
-            : 'Không tải được danh sách đơn hàng từ máy chủ Backend.'
-        );
+        return [];
+      });
+
+    // 5. Tải dự báo AI độc lập
+    const loadForecastTask = api
+      .get('/DuBao', { timeout: 4000 })
+      .then((res) => res.data)
+      .catch(() =>
+        axios
+          .get(`${AI_BASE_URL}/forecast`, { timeout: 4000 })
+          .then((res) => res.data)
+          .catch(() => null)
+      );
+
+    // Chốt tắt trạng thái "Đang tải..." sau tối đa 8 giây bất kể mạng ra sao
+    const [spList, ordList, forecastData] = await Promise.all([
+      loadProductsTask,
+      loadOrdersTask,
+      loadForecastTask,
+    ]);
+
+    if (forecastData) {
+      const list =
+        forecastData.danhSachDuBao ||
+        forecastData.forecasts ||
+        forecastData.items ||
+        (Array.isArray(forecastData) ? forecastData : []);
+      if (list.length > 0) setForecasts(list);
+
+      if (forecastData.mae || forecastData.metrics?.mae) {
+        setModelMetrics((prev) => ({
+          ...prev,
+          modelName: forecastData.moHinh || forecastData.modelName || prev.modelName,
+          mae: forecastData.mae ?? forecastData.metrics?.mae ?? prev.mae,
+          rmse: forecastData.rmse ?? forecastData.metrics?.rmse ?? prev.rmse,
+        }));
       }
+    }
 
-      setLoading(false);
-
-      let forecastData = null;
+    if (spList.length > 0 || ordList.length > 0) {
       try {
-        const dubaoRes = await api.get('/DuBao', { timeout: 4000 });
-        forecastData = dubaoRes.data;
-      } catch {
-        try {
-          const pyRes = await axios.get(`${AI_BASE_URL}/forecast`, { timeout: 4000 });
-          forecastData = pyRes.data;
-        } catch {
-          forecastData = null;
-        }
-      }
-
-      if (forecastData) {
-        const list =
-          forecastData.danhSachDuBao ||
-          forecastData.forecasts ||
-          forecastData.items ||
-          (Array.isArray(forecastData) ? forecastData : []);
-        setForecasts(list);
-
-        if (forecastData.mae || forecastData.metrics?.mae) {
-          setModelMetrics((prev) => ({
-            ...prev,
-            modelName: forecastData.moHinh || forecastData.modelName || prev.modelName,
-            mae: forecastData.mae ?? forecastData.metrics?.mae ?? prev.mae,
-            rmse: forecastData.rmse ?? forecastData.metrics?.rmse ?? prev.rmse,
-          }));
-        }
-      } else if (spList.length > 0) {
-        setForecasts(
-          spList.slice(0, 12).map((p, idx) => {
-            const predicted = Math.max(18, 45 - idx * 2);
-            const needImport = Math.max(0, predicted - (p.soLuongTon ?? 15) + 10);
-            return {
-              maSanPham: p.maSanPham,
-              tenSanPham: p.tenSanPham,
-              soLuongTon: p.soLuongTon ?? 15,
-              duBaoThangToi: predicted,
-              deXuatNhap: needImport,
-            };
+        localStorage.setItem(
+          'thx_admin_fast_cache',
+          JSON.stringify({
+            products: spList,
+            orders: ordList.slice(0, 120),
+            savedAt: Date.now(),
           })
         );
+      } catch {
+        // Bỏ qua
       }
-    } finally {
-      setLoading(false);
     }
-  }, []);
+
+    setLoading(false);
+  }, [buildFallbackForecast]);
 
   useEffect(() => {
     loadAllData();
@@ -512,7 +537,7 @@ export default function AdminDashboard() {
         try {
           await api.put(`/DonHang/${orderId}/confirm-payment`);
         } catch {
-          // Bỏ qua nếu đã xác nhận trước đó
+          // Bỏ qua
         }
       }
       await writeLocalMeta(orderId, patch);
@@ -691,7 +716,7 @@ export default function AdminDashboard() {
       return;
     }
     try {
-      const compressedDataUrl = await compressImageFile(file, 520, 0.75);
+      const compressedDataUrl = await compressImageFile(file, 360, 0.68);
       setImageFileName(file.name);
       setProductForm((prev) => ({
         ...prev,
@@ -948,7 +973,7 @@ export default function AdminDashboard() {
             title="Tải lại dữ liệu mới nhất"
           >
             <RefreshCw size={16} />
-            <span>{loading ? 'Đang tải...' : 'Làm mới'}</span>
+            <span>{loading ? 'Đang đồng bộ...' : 'Làm mới'}</span>
           </button>
 
           <button
@@ -1255,983 +1280,977 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      {loading ? (
-        <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
-          Đang tải dữ liệu quản trị hệ thống...
-        </div>
-      ) : (
-        <>
-          {/* TAB 1: QUẢN LÝ ĐƠN HÀNG */}
-          {activeTab === 'orders' && (
-            <div className="panel" style={{ padding: 24 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: 12,
-                  marginBottom: 18,
-                }}
-              >
-                <h2 style={{ fontSize: '1.35rem', margin: 0 }}>Danh Sách Đơn Hàng Khách Đặt</h2>
+      {/* TAB 1: QUẢN LÝ ĐƠN HÀNG */}
+      {activeTab === 'orders' && (
+        <div className="panel" style={{ padding: 24 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+              marginBottom: 18,
+            }}
+          >
+            <h2 style={{ fontSize: '1.35rem', margin: 0 }}>Danh Sách Đơn Hàng Khách Đặt</h2>
 
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <div style={{ position: 'relative' }}>
-                    <Search
-                      size={15}
-                      color="#9ca3af"
-                      style={{ position: 'absolute', left: 11, top: 11 }}
-                    />
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="Tìm mã đơn, tên khách, SĐT..."
-                      value={orderSearch}
-                      onChange={(e) => setOrderSearch(e.target.value)}
-                      style={{ paddingLeft: 34, height: 38, fontSize: '0.86rem', width: 230 }}
-                    />
-                  </div>
-
-                  <select
-                    className="form-control"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    style={{ height: 38, fontSize: '0.86rem', width: 215 }}
-                  >
-                    <option value="ALL">Tất cả trạng thái ({orders.length})</option>
-                    <option value="Pending">Chờ xác nhận</option>
-                    <option value="Confirmed">Đang cắm hoa</option>
-                    <option value="Shipping">Shipper đang giao / Sẵn sàng</option>
-                    <option value="Completed">Đã giao / Đã nhận hoa</option>
-                    <option value="Cancelled">Đã hủy</option>
-                  </select>
-                </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ position: 'relative' }}>
+                <Search
+                  size={15}
+                  color="#9ca3af"
+                  style={{ position: 'absolute', left: 11, top: 11 }}
+                />
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Tìm mã đơn, tên khách, SĐT..."
+                  value={orderSearch}
+                  onChange={(e) => setOrderSearch(e.target.value)}
+                  style={{ paddingLeft: 34, height: 38, fontSize: '0.86rem', width: 230 }}
+                />
               </div>
 
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                  <thead>
-                    <tr
-                      style={{
-                        borderBottom: '2px solid #f3f4f6',
-                        textAlign: 'left',
-                        color: '#6b7280',
-                        fontSize: '0.82rem',
-                      }}
-                    >
-                      <th style={{ padding: '12px 10px' }}>Mã Đơn</th>
-                      <th style={{ padding: '12px 10px' }}>Khách nhận &amp; Hình thức</th>
-                      <th style={{ padding: '12px 10px' }}>Ngày đặt / Giao</th>
-                      <th style={{ padding: '12px 10px' }}>Tổng tiền</th>
-                      <th style={{ padding: '12px 10px' }}>Thanh toán</th>
-                      <th style={{ padding: '12px 10px' }}>Trạng thái</th>
-                      <th style={{ padding: '12px 10px', textAlign: 'right' }}>Thao tác</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedOrders.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} style={{ textAlign: 'center', padding: 32, color: '#6b7280' }}>
-                          Không tìm thấy đơn hàng nào phù hợp với điều kiện lọc.
+              <select
+                className="form-control"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                style={{ height: 38, fontSize: '0.86rem', width: 215 }}
+              >
+                <option value="ALL">Tất cả trạng thái ({orders.length})</option>
+                <option value="Pending">Chờ xác nhận</option>
+                <option value="Confirmed">Đang cắm hoa</option>
+                <option value="Shipping">Shipper đang giao / Sẵn sàng</option>
+                <option value="Completed">Đã giao / Đã nhận hoa</option>
+                <option value="Cancelled">Đã hủy</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+              <thead>
+                <tr
+                  style={{
+                    borderBottom: '2px solid #f3f4f6',
+                    textAlign: 'left',
+                    color: '#6b7280',
+                    fontSize: '0.82rem',
+                  }}
+                >
+                  <th style={{ padding: '12px 10px' }}>Mã Đơn</th>
+                  <th style={{ padding: '12px 10px' }}>Khách nhận &amp; Hình thức</th>
+                  <th style={{ padding: '12px 10px' }}>Ngày đặt / Giao</th>
+                  <th style={{ padding: '12px 10px' }}>Tổng tiền</th>
+                  <th style={{ padding: '12px 10px' }}>Thanh toán</th>
+                  <th style={{ padding: '12px 10px' }}>Trạng thái</th>
+                  <th style={{ padding: '12px 10px', textAlign: 'right' }}>Thao tác</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedOrders.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: 'center', padding: 32, color: '#6b7280' }}>
+                      {loading
+                        ? 'Đang tải danh sách đơn hàng...'
+                        : 'Không tìm thấy đơn hàng nào phù hợp với điều kiện lọc.'}
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedOrders.map((order) => {
+                    const meta = orderMetaMap[order.maDonHang] || {};
+                    const address =
+                      order.diaChiGiao || order.diaChiGiaoHang || order.diaChi || '';
+                    const isPickup =
+                      meta.deliveryMethod === 'pickup' ||
+                      address.toLowerCase().includes('tới cửa hàng lấy') ||
+                      String(order.ghiChu || '').toLowerCase().includes('tới tiệm lấy');
+
+                    const st = normalizeAdminOrderStatus(
+                      extractRawStatus(order, meta),
+                      isPickup
+                    );
+
+                    const rawPayment =
+                      meta.paymentMethod ||
+                      order.phuongThucThanhToan ||
+                      order.hinhThucThanhToan ||
+                      'VietQR';
+                    const isVietQR = rawPayment.toLowerCase().includes('qr');
+                    const isPaid =
+                      meta.isPaid === true ||
+                      order.daThanhToan === true ||
+                      String(order.trangThaiThanhToan || '')
+                        .toLowerCase()
+                        .includes('đã thanh toán') ||
+                      st.code === 'Completed';
+
+                    const totalMoney =
+                      meta.grandTotal ?? order.tongThanhToan ?? order.tongTien ?? 0;
+                    const isBusy = updatingOrderId === order.maDonHang;
+
+                    return (
+                      <tr
+                        key={order.maDonHang}
+                        style={{ borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}
+                      >
+                        <td style={{ padding: '13px 10px', fontWeight: 700 }}>
+                          #{order.maDonHang}
+                        </td>
+
+                        <td style={{ padding: '13px 10px' }}>
+                          <div style={{ fontWeight: 600 }}>
+                            {order.tenNguoiNhan || 'Khách hàng'}
+                            {order.sdtNguoiNhan && (
+                              <span style={{ color: '#6b7280', fontWeight: 400 }}>
+                                {' '}
+                                ({order.sdtNguoiNhan})
+                              </span>
+                            )}
+                          </div>
+                          <div
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              fontSize: '0.77rem',
+                              marginTop: 3,
+                              color: isPickup ? '#15803d' : '#be123c',
+                              fontWeight: 600,
+                            }}
+                          >
+                            {isPickup ? <Store size={12} /> : <Truck size={12} />}
+                            <span>
+                              {isPickup
+                                ? 'Tới tiệm lấy (0 đ ship)'
+                                : meta.distanceKm
+                                ? `Ship tận nơi (${meta.distanceKm} km)`
+                                : 'Ship tận nơi'}
+                            </span>
+                          </div>
+                        </td>
+
+                        <td style={{ padding: '13px 10px', fontSize: '0.84rem', color: '#4b5563' }}>
+                          <div>Đặt: {formatDateOnly(order.ngayDat)}</div>
+                          {order.ngayGiao && (
+                            <div style={{ color: '#6b7280', fontSize: '0.78rem' }}>
+                              Giao: {formatDateOnly(order.ngayGiao)}
+                            </div>
+                          )}
+                        </td>
+
+                        <td style={{ padding: '13px 10px', fontWeight: 700, color: '#e11d48' }}>
+                          {formatVND(totalMoney)}
+                        </td>
+
+                        <td style={{ padding: '13px 10px' }}>
+                          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151' }}>
+                            {isVietQR ? 'Online (VietQR)' : 'Tiền mặt (COD)'}
+                          </div>
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              marginTop: 3,
+                              padding: '2px 8px',
+                              borderRadius: 999,
+                              fontSize: '0.74rem',
+                              fontWeight: 600,
+                              background: isPaid ? '#dcfce7' : '#fef3c7',
+                              color: isPaid ? '#166534' : '#92400e',
+                            }}
+                          >
+                            {isPaid ? 'Đã thanh toán' : 'Chưa thanh toán'}
+                          </span>
+                        </td>
+
+                        <td style={{ padding: '13px 10px' }}>
+                          <select
+                            aria-label={`Trạng thái đơn #${order.maDonHang}`}
+                            disabled={isBusy}
+                            value={st.code}
+                            onChange={(e) =>
+                              handleChangeOrderStatus(order, e.target.value, isPickup)
+                            }
+                            style={{
+                              background: st.bg,
+                              color: st.color,
+                              border: `1.5px solid ${st.border}`,
+                              borderRadius: 999,
+                              padding: '6px 12px',
+                              fontSize: '0.8rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              outline: 'none',
+                              minWidth: 175,
+                            }}
+                          >
+                            <option value="Pending">Chờ xác nhận</option>
+                            <option value="Confirmed">Đang cắm hoa</option>
+                            <option value="Shipping">
+                              {isPickup ? 'Sẵn sàng tại tiệm' : 'Shipper đang giao'}
+                            </option>
+                            <option value="Completed">
+                              {isPickup ? 'Khách đã nhận hoa' : 'Đã giao thành công'}
+                            </option>
+                            <option value="Cancelled">Đã hủy</option>
+                          </select>
+                        </td>
+
+                        <td style={{ padding: '13px 10px', textAlign: 'right' }}>
+                          <div
+                            style={{
+                              display: 'inline-flex',
+                              gap: 6,
+                              alignItems: 'center',
+                              justifyContent: 'flex-end',
+                            }}
+                          >
+                            {st.code === 'Pending' && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() =>
+                                  handleChangeOrderStatus(order, 'Confirmed', isPickup)
+                                }
+                                className="btn btn-primary btn-sm"
+                                style={{ whiteSpace: 'nowrap' }}
+                              >
+                                Xác nhận
+                              </button>
+                            )}
+
+                            {st.code === 'Confirmed' && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() =>
+                                  handleChangeOrderStatus(order, 'Shipping', isPickup)
+                                }
+                                className="btn btn-primary btn-sm"
+                                style={{ whiteSpace: 'nowrap' }}
+                              >
+                                {isPickup ? 'Sẵn sàng lấy' : 'Giao Shipper'}
+                              </button>
+                            )}
+
+                            {st.code === 'Shipping' && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() =>
+                                  handleChangeOrderStatus(order, 'Completed', isPickup)
+                                }
+                                className="btn btn-sage btn-sm"
+                                style={{ whiteSpace: 'nowrap' }}
+                              >
+                                <Check size={14} /> Hoàn tất
+                              </button>
+                            )}
+
+                            {!isPaid && st.code !== 'Cancelled' && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => handleConfirmPayment(order)}
+                                className="btn btn-outline btn-sm"
+                                style={{ whiteSpace: 'nowrap' }}
+                              >
+                                <CreditCard size={14} /> Thu tiền
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              disabled={loadingDetailId === order.maDonHang}
+                              onClick={() => handleOpenOrderDetail(order)}
+                              className="btn btn-outline btn-sm"
+                              style={{ whiteSpace: 'nowrap' }}
+                            >
+                              <Eye size={14} />
+                              <span>Chi tiết</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
-                    ) : (
-                      paginatedOrders.map((order) => {
-                        const meta = orderMetaMap[order.maDonHang] || {};
-                        const address =
-                          order.diaChiGiao || order.diaChiGiaoHang || order.diaChi || '';
-                        const isPickup =
-                          meta.deliveryMethod === 'pickup' ||
-                          address.toLowerCase().includes('tới cửa hàng lấy') ||
-                          String(order.ghiChu || '').toLowerCase().includes('tới tiệm lấy');
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
 
-                        const st = normalizeAdminOrderStatus(
-                          extractRawStatus(order, meta),
-                          isPickup
-                        );
-
-                        const rawPayment =
-                          meta.paymentMethod ||
-                          order.phuongThucThanhToan ||
-                          order.hinhThucThanhToan ||
-                          'VietQR';
-                        const isVietQR = rawPayment.toLowerCase().includes('qr');
-                        const isPaid =
-                          meta.isPaid === true ||
-                          order.daThanhToan === true ||
-                          String(order.trangThaiThanhToan || '')
-                            .toLowerCase()
-                            .includes('đã thanh toán') ||
-                          st.code === 'Completed';
-
-                        const totalMoney =
-                          meta.grandTotal ?? order.tongThanhToan ?? order.tongTien ?? 0;
-                        const isBusy = updatingOrderId === order.maDonHang;
-
-                        return (
-                          <tr
-                            key={order.maDonHang}
-                            style={{ borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}
-                          >
-                            <td style={{ padding: '13px 10px', fontWeight: 700 }}>
-                              #{order.maDonHang}
-                            </td>
-
-                            <td style={{ padding: '13px 10px' }}>
-                              <div style={{ fontWeight: 600 }}>
-                                {order.tenNguoiNhan || 'Khách hàng'}
-                                {order.sdtNguoiNhan && (
-                                  <span style={{ color: '#6b7280', fontWeight: 400 }}>
-                                    {' '}
-                                    ({order.sdtNguoiNhan})
-                                  </span>
-                                )}
-                              </div>
-                              <div
-                                style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 4,
-                                  fontSize: '0.77rem',
-                                  marginTop: 3,
-                                  color: isPickup ? '#15803d' : '#be123c',
-                                  fontWeight: 600,
-                                }}
-                              >
-                                {isPickup ? <Store size={12} /> : <Truck size={12} />}
-                                <span>
-                                  {isPickup
-                                    ? 'Tới tiệm lấy (0 đ ship)'
-                                    : meta.distanceKm
-                                    ? `Ship tận nơi (${meta.distanceKm} km)`
-                                    : 'Ship tận nơi'}
-                                </span>
-                              </div>
-                            </td>
-
-                            <td style={{ padding: '13px 10px', fontSize: '0.84rem', color: '#4b5563' }}>
-                              <div>Đặt: {formatDateOnly(order.ngayDat)}</div>
-                              {order.ngayGiao && (
-                                <div style={{ color: '#6b7280', fontSize: '0.78rem' }}>
-                                  Giao: {formatDateOnly(order.ngayGiao)}
-                                </div>
-                              )}
-                            </td>
-
-                            <td style={{ padding: '13px 10px', fontWeight: 700, color: '#e11d48' }}>
-                              {formatVND(totalMoney)}
-                            </td>
-
-                            <td style={{ padding: '13px 10px' }}>
-                              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151' }}>
-                                {isVietQR ? 'Online (VietQR)' : 'Tiền mặt (COD)'}
-                              </div>
-                              <span
-                                style={{
-                                  display: 'inline-block',
-                                  marginTop: 3,
-                                  padding: '2px 8px',
-                                  borderRadius: 999,
-                                  fontSize: '0.74rem',
-                                  fontWeight: 600,
-                                  background: isPaid ? '#dcfce7' : '#fef3c7',
-                                  color: isPaid ? '#166534' : '#92400e',
-                                }}
-                              >
-                                {isPaid ? 'Đã thanh toán' : 'Chưa thanh toán'}
-                              </span>
-                            </td>
-
-                            <td style={{ padding: '13px 10px' }}>
-                              <select
-                                aria-label={`Trạng thái đơn #${order.maDonHang}`}
-                                disabled={isBusy}
-                                value={st.code}
-                                onChange={(e) =>
-                                  handleChangeOrderStatus(order, e.target.value, isPickup)
-                                }
-                                style={{
-                                  background: st.bg,
-                                  color: st.color,
-                                  border: `1.5px solid ${st.border}`,
-                                  borderRadius: 999,
-                                  padding: '6px 12px',
-                                  fontSize: '0.8rem',
-                                  fontWeight: 700,
-                                  cursor: 'pointer',
-                                  outline: 'none',
-                                  minWidth: 175,
-                                }}
-                              >
-                                <option value="Pending">Chờ xác nhận</option>
-                                <option value="Confirmed">Đang cắm hoa</option>
-                                <option value="Shipping">
-                                  {isPickup ? 'Sẵn sàng tại tiệm' : 'Shipper đang giao'}
-                                </option>
-                                <option value="Completed">
-                                  {isPickup ? 'Khách đã nhận hoa' : 'Đã giao thành công'}
-                                </option>
-                                <option value="Cancelled">Đã hủy</option>
-                              </select>
-                            </td>
-
-                            <td style={{ padding: '13px 10px', textAlign: 'right' }}>
-                              <div
-                                style={{
-                                  display: 'inline-flex',
-                                  gap: 6,
-                                  alignItems: 'center',
-                                  justifyContent: 'flex-end',
-                                }}
-                              >
-                                {st.code === 'Pending' && (
-                                  <button
-                                    type="button"
-                                    disabled={isBusy}
-                                    onClick={() =>
-                                      handleChangeOrderStatus(order, 'Confirmed', isPickup)
-                                    }
-                                    className="btn btn-primary btn-sm"
-                                    style={{ whiteSpace: 'nowrap' }}
-                                  >
-                                    Xác nhận
-                                  </button>
-                                )}
-
-                                {st.code === 'Confirmed' && (
-                                  <button
-                                    type="button"
-                                    disabled={isBusy}
-                                    onClick={() =>
-                                      handleChangeOrderStatus(order, 'Shipping', isPickup)
-                                    }
-                                    className="btn btn-primary btn-sm"
-                                    style={{ whiteSpace: 'nowrap' }}
-                                  >
-                                    {isPickup ? 'Sẵn sàng lấy' : 'Giao Shipper'}
-                                  </button>
-                                )}
-
-                                {st.code === 'Shipping' && (
-                                  <button
-                                    type="button"
-                                    disabled={isBusy}
-                                    onClick={() =>
-                                      handleChangeOrderStatus(order, 'Completed', isPickup)
-                                    }
-                                    className="btn btn-sage btn-sm"
-                                    style={{ whiteSpace: 'nowrap' }}
-                                  >
-                                    <Check size={14} /> Hoàn tất
-                                  </button>
-                                )}
-
-                                {!isPaid && st.code !== 'Cancelled' && (
-                                  <button
-                                    type="button"
-                                    disabled={isBusy}
-                                    onClick={() => handleConfirmPayment(order)}
-                                    className="btn btn-outline btn-sm"
-                                    style={{ whiteSpace: 'nowrap' }}
-                                  >
-                                    <CreditCard size={14} /> Thu tiền
-                                  </button>
-                                )}
-
-                                <button
-                                  type="button"
-                                  disabled={loadingDetailId === order.maDonHang}
-                                  onClick={() => handleOpenOrderDetail(order)}
-                                  className="btn btn-outline btn-sm"
-                                  style={{ whiteSpace: 'nowrap' }}
-                                >
-                                  <Eye size={14} />
-                                  <span>Chi tiết</span>
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+          {filteredOrders.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 12,
+                marginTop: 18,
+                paddingTop: 14,
+                borderTop: '1px solid #f3f4f6',
+                fontSize: '0.85rem',
+                color: '#6b7280',
+              }}
+            >
+              <div>
+                Hiển thị <b>{startIndex + 1}</b>–
+                <b>{Math.min(startIndex + PAGE_SIZE, filteredOrders.length)}</b> trên tổng{' '}
+                <b>{filteredOrders.length}</b> đơn hàng
               </div>
 
-              {filteredOrders.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  disabled={safePage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="btn btn-outline btn-sm"
+                >
+                  <ChevronLeft size={15} /> Trước
+                </button>
+                <span style={{ fontWeight: 600, color: '#111827', padding: '0 6px' }}>
+                  Trang {safePage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={safePage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="btn btn-outline btn-sm"
+                >
+                  Sau <ChevronRight size={15} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 2: TIN NHẮN KHÁCH HÀNG */}
+      {activeTab === 'messages' && (
+        <div
+          className="panel thx-admin-chat-grid"
+          style={{
+            padding: 0,
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              borderRight: '1px solid #f3f4f6',
+              background: '#fafafa',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div
+              style={{
+                padding: '16px 18px',
+                borderBottom: '1px solid #f3f4f6',
+                fontWeight: 700,
+                fontSize: '1.05rem',
+              }}
+            >
+              Hộp Thoại Khách Hàng ({conversations.length})
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {conversations.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#6b7280', fontSize: '0.88rem' }}>
+                  Chưa có khách hàng nào gửi tin nhắn.
+                </div>
+              ) : (
+                conversations.map((conv) => {
+                  const isSelected = activeConversation?.id === conv.id;
+                  const lastMsg = conv.messages?.[conv.messages.length - 1];
+                  return (
+                    <button
+                      key={conv.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedConvId(conv.id);
+                        markConversationReadByAdmin(conv.id);
+                      }}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '14px 16px',
+                        borderBottom: '1px solid #f3f4f6',
+                        background: isSelected ? '#fff1f2' : 'transparent',
+                        borderLeft: isSelected
+                          ? '4px solid #e11d48'
+                          : '4px solid transparent',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <span style={{ fontWeight: 700, color: '#111827', fontSize: '0.92rem' }}>
+                          {conv.customerName}
+                        </span>
+                        <span style={{ fontSize: '0.73rem', color: '#9ca3af' }}>
+                          {formatShortTime(conv.updatedAt)}
+                        </span>
+                      </div>
+
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 8,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: '0.82rem',
+                            color: '#6b7280',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {lastMsg
+                            ? `${lastMsg.sender === 'admin' ? 'Bạn: ' : ''}${lastMsg.text}`
+                            : 'Bắt đầu trò chuyện'}
+                        </span>
+
+                        {conv.unreadByAdmin > 0 && (
+                          <span
+                            style={{
+                              background: '#e11d48',
+                              color: '#ffffff',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              borderRadius: 999,
+                              padding: '1px 7px',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {conv.unreadByAdmin}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', background: '#ffffff' }}>
+            {activeConversation ? (
+              <>
                 <div
                   style={{
+                    padding: '14px 20px',
+                    borderBottom: '1px solid #f3f4f6',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     flexWrap: 'wrap',
-                    gap: 12,
-                    marginTop: 18,
-                    paddingTop: 14,
-                    borderTop: '1px solid #f3f4f6',
-                    fontSize: '0.85rem',
-                    color: '#6b7280',
+                    gap: 8,
                   }}
                 >
                   <div>
-                    Hiển thị <b>{startIndex + 1}</b>–
-                    <b>{Math.min(startIndex + PAGE_SIZE, filteredOrders.length)}</b> trên tổng{' '}
-                    <b>{filteredOrders.length}</b> đơn hàng
+                    <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>
+                      {activeConversation.customerName}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>
+                      Email: {activeConversation.customerEmail}
+                      {activeConversation.customerPhone
+                        ? ` • SĐT: ${activeConversation.customerPhone}`
+                        : ''}
+                    </div>
                   </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button
-                      type="button"
-                      disabled={safePage <= 1}
-                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                      className="btn btn-outline btn-sm"
-                    >
-                      <ChevronLeft size={15} /> Trước
-                    </button>
-                    <span style={{ fontWeight: 600, color: '#111827', padding: '0 6px' }}>
-                      Trang {safePage} / {totalPages}
-                    </span>
-                    <button
-                      type="button"
-                      disabled={safePage >= totalPages}
-                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                      className="btn btn-outline btn-sm"
-                    >
-                      Sau <ChevronRight size={15} />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 2: TIN NHẮN KHÁCH HÀNG */}
-          {activeTab === 'messages' && (
-            <div
-              className="panel thx-admin-chat-grid"
-              style={{
-                padding: 0,
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  borderRight: '1px solid #f3f4f6',
-                  background: '#fafafa',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-              >
-                <div
-                  style={{
-                    padding: '16px 18px',
-                    borderBottom: '1px solid #f3f4f6',
-                    fontWeight: 700,
-                    fontSize: '1.05rem',
-                  }}
-                >
-                  Hộp Thoại Khách Hàng ({conversations.length})
-                </div>
-
-                <div style={{ flex: 1, overflowY: 'auto' }}>
-                  {conversations.length === 0 ? (
-                    <div style={{ padding: 24, textAlign: 'center', color: '#6b7280', fontSize: '0.88rem' }}>
-                      Chưa có khách hàng nào gửi tin nhắn.
-                    </div>
-                  ) : (
-                    conversations.map((conv) => {
-                      const isSelected = activeConversation?.id === conv.id;
-                      const lastMsg = conv.messages?.[conv.messages.length - 1];
-                      return (
-                        <button
-                          key={conv.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedConvId(conv.id);
-                            markConversationReadByAdmin(conv.id);
-                          }}
-                          style={{
-                            width: '100%',
-                            textAlign: 'left',
-                            padding: '14px 16px',
-                            borderBottom: '1px solid #f3f4f6',
-                            background: isSelected ? '#fff1f2' : 'transparent',
-                            borderLeft: isSelected
-                              ? '4px solid #e11d48'
-                              : '4px solid transparent',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 4,
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                            }}
-                          >
-                            <span style={{ fontWeight: 700, color: '#111827', fontSize: '0.92rem' }}>
-                              {conv.customerName}
-                            </span>
-                            <span style={{ fontSize: '0.73rem', color: '#9ca3af' }}>
-                              {formatShortTime(conv.updatedAt)}
-                            </span>
-                          </div>
-
-                          <div
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              gap: 8,
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: '0.82rem',
-                                color: '#6b7280',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {lastMsg
-                                ? `${lastMsg.sender === 'admin' ? 'Bạn: ' : ''}${lastMsg.text}`
-                                : 'Bắt đầu trò chuyện'}
-                            </span>
-
-                            {conv.unreadByAdmin > 0 && (
-                              <span
-                                style={{
-                                  background: '#e11d48',
-                                  color: '#ffffff',
-                                  fontSize: '0.7rem',
-                                  fontWeight: 700,
-                                  borderRadius: 999,
-                                  padding: '1px 7px',
-                                  flexShrink: 0,
-                                }}
-                              >
-                                {conv.unreadByAdmin}
-                              </span>
-                            )}
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', background: '#ffffff' }}>
-                {activeConversation ? (
-                  <>
-                    <div
-                      style={{
-                        padding: '14px 20px',
-                        borderBottom: '1px solid #f3f4f6',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        flexWrap: 'wrap',
-                        gap: 8,
-                      }}
-                    >
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>
-                          {activeConversation.customerName}
-                        </div>
-                        <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>
-                          Email: {activeConversation.customerEmail}
-                          {activeConversation.customerPhone
-                            ? ` • SĐT: ${activeConversation.customerPhone}`
-                            : ''}
-                        </div>
-                      </div>
-                      <span
-                        style={{
-                          background: '#dcfce7',
-                          color: '#166534',
-                          fontSize: '0.78rem',
-                          fontWeight: 600,
-                          padding: '4px 10px',
-                          borderRadius: 999,
-                        }}
-                      >
-                        Đang đồng bộ trực tuyến
-                      </span>
-                    </div>
-
-                    <div
-                      style={{
-                        flex: 1,
-                        padding: 20,
-                        overflowY: 'auto',
-                        background: '#fffafb',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 12,
-                        maxHeight: 340,
-                      }}
-                    >
-                      {(activeConversation.messages || []).map((m) => {
-                        const isAdminMsg = m.sender === 'admin';
-                        return (
-                          <div
-                            key={m.id}
-                            style={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: isAdminMsg ? 'flex-end' : 'flex-start',
-                            }}
-                          >
-                            <div
-                              style={{
-                                maxWidth: '72%',
-                                padding: '10px 14px',
-                                borderRadius: isAdminMsg
-                                  ? '16px 16px 4px 16px'
-                                  : '16px 16px 16px 4px',
-                                background: isAdminMsg ? '#e11d48' : '#ffffff',
-                                color: isAdminMsg ? '#ffffff' : '#1f2937',
-                                border: isAdminMsg ? 'none' : '1px solid #e5e7eb',
-                                fontSize: '0.9rem',
-                                lineHeight: 1.5,
-                              }}
-                            >
-                              {m.text}
-                            </div>
-                            <span style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 4 }}>
-                              {isAdminMsg ? 'Admin' : activeConversation.customerName} &bull;{' '}
-                              {formatShortTime(m.createdAt)}
-                            </span>
-                          </div>
-                        );
-                      })}
-                      <div ref={adminChatEndRef} />
-                    </div>
-
-                    <div
-                      style={{
-                        padding: '8px 16px',
-                        borderTop: '1px solid #f3f4f6',
-                        display: 'flex',
-                        gap: 6,
-                        flexWrap: 'wrap',
-                        background: '#fafafa',
-                      }}
-                    >
-                      {ADMIN_QUICK_REPLIES.map((tpl) => (
-                        <button
-                          key={tpl}
-                          type="button"
-                          disabled={sendingReply}
-                          onClick={() => handleSendAdminReply(tpl)}
-                          style={{
-                            fontSize: '0.75rem',
-                            padding: '4px 10px',
-                            borderRadius: 999,
-                            background: '#ffffff',
-                            color: '#be123c',
-                            border: '1px solid #fecdd3',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          + {tpl}
-                        </button>
-                      ))}
-                    </div>
-
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        handleSendAdminReply();
-                      }}
-                      style={{
-                        padding: '12px 16px',
-                        borderTop: '1px solid #f3f4f6',
-                        display: 'flex',
-                        gap: 10,
-                      }}
-                    >
-                      <input
-                        type="text"
-                        className="form-control"
-                        placeholder="Nhập nội dung phản hồi cho khách hàng..."
-                        value={adminReplyText}
-                        onChange={(e) => setAdminReplyText(e.target.value)}
-                      />
-                      <button
-                        type="submit"
-                        disabled={sendingReply}
-                        className="btn btn-primary"
-                        style={{ whiteSpace: 'nowrap' }}
-                      >
-                        <Send size={16} />
-                        <span>{sendingReply ? 'Đang gửi...' : 'Gửi phản hồi'}</span>
-                      </button>
-                    </form>
-                  </>
-                ) : (
-                  <div
+                  <span
                     style={{
-                      flex: 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#6b7280',
-                      padding: 32,
+                      background: '#dcfce7',
+                      color: '#166534',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      padding: '4px 10px',
+                      borderRadius: 999,
                     }}
                   >
-                    Chọn một khách hàng ở danh sách bên trái để xem và trả lời tin nhắn.
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: DỰ BÁO NHẬP HÀNG AI */}
-          {activeTab === 'forecast' && (
-            <div className="panel" style={{ padding: 24 }}>
-              <div style={{ marginBottom: 18 }}>
-                <h2 style={{ fontSize: '1.35rem' }}>
-                  Bảng Khuyến Nghị Nhập Hàng Tháng Tới (AI Linear Regression)
-                </h2>
-                <p style={{ fontSize: '0.88rem', color: '#6b7280', marginTop: 4 }}>
-                  Hệ thống phân tích dữ liệu tiêu thụ 24 tháng kết hợp tồn kho hiện tại để đề xuất số lượng nhập tối ưu.
-                </p>
-              </div>
-
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                  <thead>
-                    <tr
-                      style={{
-                        borderBottom: '2px solid #f3f4f6',
-                        textAlign: 'left',
-                        color: '#6b7280',
-                        fontSize: '0.82rem',
-                      }}
-                    >
-                      <th style={{ padding: '12px 10px' }}>Mã Hoa</th>
-                      <th style={{ padding: '12px 10px' }}>Tên Bó Hoa</th>
-                      <th style={{ padding: '12px 10px' }}>Tồn kho hiện tại</th>
-                      <th style={{ padding: '12px 10px' }}>AI dự báo nhu cầu</th>
-                      <th style={{ padding: '12px 10px' }}>Đề xuất nhập thêm</th>
-                      <th style={{ padding: '12px 10px' }}>Trạng thái kho</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {forecasts.map((item, idx) => {
-                      const stock = item.soLuongTon ?? 15;
-                      const predicted =
-                        item.duBaoThangToi ?? item.soLuongDuBao ?? item.predictedSales ?? 30;
-                      const importQty =
-                        item.deXuatNhap ??
-                        item.soLuongCanNhap ??
-                        Math.max(0, Math.round(predicted - stock + 10));
-                      const lowStock = importQty > 15;
-
-                      return (
-                        <tr
-                          key={item.maSanPham ?? idx}
-                          style={{ borderBottom: '1px solid #f3f4f6' }}
-                        >
-                          <td style={{ padding: '12px 10px', fontWeight: 600 }}>
-                            #{item.maSanPham ?? idx + 1}
-                          </td>
-                          <td style={{ padding: '12px 10px', fontWeight: 600 }}>
-                            {item.tenSanPham}
-                          </td>
-                          <td style={{ padding: '12px 10px' }}>{stock} bó</td>
-                          <td style={{ padding: '12px 10px', fontWeight: 600, color: '#2563eb' }}>
-                            {Math.round(predicted)} bó
-                          </td>
-                          <td style={{ padding: '12px 10px', fontWeight: 700, color: '#e11d48' }}>
-                            +{Math.round(importQty)} bó
-                          </td>
-                          <td style={{ padding: '12px 10px' }}>
-                            <span
-                              style={{
-                                padding: '4px 10px',
-                                borderRadius: 999,
-                                fontSize: '0.78rem',
-                                fontWeight: 600,
-                                background: lowStock ? '#fee2e2' : '#dcfce7',
-                                color: lowStock ? '#b91c1c' : '#166534',
-                              }}
-                            >
-                              {lowStock ? 'Cần nhập gấp' : 'Tồn kho an toàn'}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: QUẢN LÝ SẢN PHẨM */}
-          {activeTab === 'products' && (
-            <div className="panel" style={{ padding: 24 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: 12,
-                  marginBottom: 18,
-                }}
-              >
-                <h2 style={{ fontSize: '1.35rem', margin: 0 }}>
-                  Danh Mục Hoa Tươi ({filteredProducts.length})
-                </h2>
-
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <div style={{ position: 'relative' }}>
-                    <Search
-                      size={15}
-                      color="#9ca3af"
-                      style={{ position: 'absolute', left: 11, top: 11 }}
-                    />
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="Tìm tên hoa, tông màu..."
-                      value={productSearch}
-                      onChange={(e) => setProductSearch(e.target.value)}
-                      style={{ paddingLeft: 34, height: 36, fontSize: '0.86rem', width: 210 }}
-                    />
-                  </div>
-
-                  <button type="button" onClick={openCreateProduct} className="btn btn-primary btn-sm">
-                    <Plus size={16} /> Thêm mẫu hoa mới
-                  </button>
+                    Đang đồng bộ trực tuyến
+                  </span>
                 </div>
-              </div>
 
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                  <thead>
-                    <tr
-                      style={{
-                        borderBottom: '2px solid #f3f4f6',
-                        textAlign: 'left',
-                        color: '#6b7280',
-                        fontSize: '0.82rem',
-                      }}
-                    >
-                      <th style={{ padding: '12px 10px' }}>Hình ảnh</th>
-                      <th style={{ padding: '12px 10px' }}>Tên bó hoa</th>
-                      <th style={{ padding: '12px 10px' }}>Danh mục</th>
-                      <th style={{ padding: '12px 10px' }}>Tông màu</th>
-                      <th style={{ padding: '12px 10px' }}>Giá bán</th>
-                      <th style={{ padding: '12px 10px' }}>Tồn kho</th>
-                      <th style={{ padding: '12px 10px', textAlign: 'right' }}>Thao tác</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredProducts.map((sp) => {
-                      const catName =
-                        sp.tenDanhMuc ||
-                        FLOWER_CATEGORIES.find((c) => c.id === sp.maDanhMuc)?.name ||
-                        'Bó hoa tươi nghệ thuật';
-                      return (
-                        <tr key={sp.maSanPham} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                          <td style={{ padding: '10px' }}>
-                            <img
-                              src={getFlowerImage(sp)}
-                              alt={sp.tenSanPham}
-                              style={{
-                                width: 52,
-                                height: 52,
-                                borderRadius: 10,
-                                objectFit: 'cover',
-                                border: '1px solid #f3f4f6',
-                              }}
-                            />
-                          </td>
-                          <td style={{ padding: '10px', fontWeight: 600 }}>{sp.tenSanPham}</td>
-                          <td style={{ padding: '10px', color: '#4b5563', fontSize: '0.84rem' }}>
-                            {catName}
-                          </td>
-                          <td style={{ padding: '10px' }}>
-                            <span
-                              style={{
-                                background: '#fff1f2',
-                                color: '#be123c',
-                                padding: '3px 10px',
-                                borderRadius: 999,
-                                fontSize: '0.8rem',
-                                fontWeight: 600,
-                              }}
-                            >
-                              {sp.tongMauSac || 'Tông Hồng'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '10px', fontWeight: 700, color: '#e11d48' }}>
-                            {formatVND(sp.giaBan)}
-                          </td>
-                          <td style={{ padding: '10px' }}>{sp.soLuongTon} bó</td>
-                          <td style={{ padding: '10px', textAlign: 'right' }}>
-                            <div style={{ display: 'inline-flex', gap: 6 }}>
-                              <button
-                                type="button"
-                                onClick={() => openEditProduct(sp)}
-                                className="btn btn-outline btn-sm"
-                              >
-                                <Edit2 size={14} /> Sửa
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteProduct(sp)}
-                                className="btn btn-outline btn-sm"
-                                style={{ color: '#e11d48' }}
-                                title="Xóa mẫu hoa"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 5: BIỂU ĐỒ & ĐỐI CHIẾU MÔ HÌNH */}
-          {activeTab === 'charts' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 22 }}>
-              <div className="panel" style={{ padding: 24 }}>
-                <h2 style={{ fontSize: '1.35rem', marginBottom: 6 }}>
-                  Biểu Đồ Top Bó Hoa Đề Xuất Nhập Tháng Tới
-                </h2>
-                <p style={{ fontSize: '0.86rem', color: '#6b7280', marginBottom: 18 }}>
-                  So sánh trực quan giữa tồn kho hiện tại và sản lượng dự báo từ mô hình AI.
-                </p>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  {forecasts.slice(0, 6).map((item, idx) => {
-                    const predicted = Math.round(
-                      item.duBaoThangToi ?? item.soLuongDuBao ?? item.predictedSales ?? 30
-                    );
-                    const stock = item.soLuongTon ?? 15;
-                    const maxVal = 60;
-                    const predPct = Math.min(100, Math.round((predicted / maxVal) * 100));
-                    const stockPct = Math.min(100, Math.round((stock / maxVal) * 100));
-
+                <div
+                  style={{
+                    flex: 1,
+                    padding: 20,
+                    overflowY: 'auto',
+                    background: '#fffafb',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 12,
+                    maxHeight: 340,
+                  }}
+                >
+                  {(activeConversation.messages || []).map((m) => {
+                    const isAdminMsg = m.sender === 'admin';
                     return (
-                      <div key={item.maSanPham ?? idx}>
+                      <div
+                        key={m.id}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: isAdminMsg ? 'flex-end' : 'flex-start',
+                        }}
+                      >
                         <div
                           style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            fontSize: '0.88rem',
-                            marginBottom: 4,
+                            maxWidth: '72%',
+                            padding: '10px 14px',
+                            borderRadius: isAdminMsg
+                              ? '16px 16px 4px 16px'
+                              : '16px 16px 16px 4px',
+                            background: isAdminMsg ? '#e11d48' : '#ffffff',
+                            color: isAdminMsg ? '#ffffff' : '#1f2937',
+                            border: isAdminMsg ? 'none' : '1px solid #e5e7eb',
+                            fontSize: '0.9rem',
+                            lineHeight: 1.5,
                           }}
                         >
-                          <b>{item.tenSanPham}</b>
-                          <span style={{ color: '#6b7280' }}>
-                            Tồn: <b>{stock}</b> bó &bull; Dự báo bán:{' '}
-                            <b style={{ color: '#e11d48' }}>{predicted}</b> bó
-                          </span>
+                          {m.text}
                         </div>
-                        <div
-                          style={{
-                            height: 12,
-                            background: '#f3f4f6',
-                            borderRadius: 999,
-                            overflow: 'hidden',
-                            position: 'relative',
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: `${predPct}%`,
-                              height: '100%',
-                              background: '#fb7185',
-                              borderRadius: 999,
-                            }}
-                          />
-                          <div
-                            style={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              width: `${stockPct}%`,
-                              height: '100%',
-                              background: '#16a34a',
-                              borderRadius: 999,
-                            }}
-                          />
-                        </div>
+                        <span style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 4 }}>
+                          {isAdminMsg ? 'Admin' : activeConversation.customerName} &bull;{' '}
+                          {formatShortTime(m.createdAt)}
+                        </span>
                       </div>
                     );
                   })}
+                  <div ref={adminChatEndRef} />
                 </div>
+
                 <div
                   style={{
+                    padding: '8px 16px',
+                    borderTop: '1px solid #f3f4f6',
                     display: 'flex',
-                    gap: 18,
-                    marginTop: 14,
-                    fontSize: '0.82rem',
-                    color: '#4b5563',
+                    gap: 6,
+                    flexWrap: 'wrap',
+                    background: '#fafafa',
                   }}
                 >
-                  <span>🟢 Tồn kho hiện tại</span>
-                  <span>🌸 Sản lượng AI dự báo tháng tới</span>
+                  {ADMIN_QUICK_REPLIES.map((tpl) => (
+                    <button
+                      key={tpl}
+                      type="button"
+                      disabled={sendingReply}
+                      onClick={() => handleSendAdminReply(tpl)}
+                      style={{
+                        fontSize: '0.75rem',
+                        padding: '4px 10px',
+                        borderRadius: 999,
+                        background: '#ffffff',
+                        color: '#be123c',
+                        border: '1px solid #fecdd3',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      + {tpl}
+                    </button>
+                  ))}
                 </div>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleSendAdminReply();
+                  }}
+                  style={{
+                    padding: '12px 16px',
+                    borderTop: '1px solid #f3f4f6',
+                    display: 'flex',
+                    gap: 10,
+                  }}
+                >
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Nhập nội dung phản hồi cho khách hàng..."
+                    value={adminReplyText}
+                    onChange={(e) => setAdminReplyText(e.target.value)}
+                  />
+                  <button
+                    type="submit"
+                    disabled={sendingReply}
+                    className="btn btn-primary"
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    <Send size={16} />
+                    <span>{sendingReply ? 'Đang gửi...' : 'Gửi phản hồi'}</span>
+                  </button>
+                </form>
+              </>
+            ) : (
+              <div
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#6b7280',
+                  padding: 32,
+                }}
+              >
+                Chọn một khách hàng ở danh sách bên trái để xem và trả lời tin nhắn.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: DỰ BÁO NHẬP HÀNG AI */}
+      {activeTab === 'forecast' && (
+        <div className="panel" style={{ padding: 24 }}>
+          <div style={{ marginBottom: 18 }}>
+            <h2 style={{ fontSize: '1.35rem' }}>
+              Bảng Khuyến Nghị Nhập Hàng Tháng Tới (AI Linear Regression)
+            </h2>
+            <p style={{ fontSize: '0.88rem', color: '#6b7280', marginTop: 4 }}>
+              Hệ thống phân tích dữ liệu tiêu thụ 24 tháng kết hợp tồn kho hiện tại để đề xuất số lượng nhập tối ưu.
+            </p>
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+              <thead>
+                <tr
+                  style={{
+                    borderBottom: '2px solid #f3f4f6',
+                    textAlign: 'left',
+                    color: '#6b7280',
+                    fontSize: '0.82rem',
+                  }}
+                >
+                  <th style={{ padding: '12px 10px' }}>Mã Hoa</th>
+                  <th style={{ padding: '12px 10px' }}>Tên Bó Hoa</th>
+                  <th style={{ padding: '12px 10px' }}>Tồn kho hiện tại</th>
+                  <th style={{ padding: '12px 10px' }}>AI dự báo nhu cầu</th>
+                  <th style={{ padding: '12px 10px' }}>Đề xuất nhập thêm</th>
+                  <th style={{ padding: '12px 10px' }}>Trạng thái kho</th>
+                </tr>
+              </thead>
+              <tbody>
+                {forecasts.map((item, idx) => {
+                  const stock = item.soLuongTon ?? 15;
+                  const predicted =
+                    item.duBaoThangToi ?? item.soLuongDuBao ?? item.predictedSales ?? 30;
+                  const importQty =
+                    item.deXuatNhap ??
+                    item.soLuongCanNhap ??
+                    Math.max(0, Math.round(predicted - stock + 10));
+                  const lowStock = importQty > 15;
+
+                  return (
+                    <tr
+                      key={item.maSanPham ?? idx}
+                      style={{ borderBottom: '1px solid #f3f4f6' }}
+                    >
+                      <td style={{ padding: '12px 10px', fontWeight: 600 }}>
+                        #{item.maSanPham ?? idx + 1}
+                      </td>
+                      <td style={{ padding: '12px 10px', fontWeight: 600 }}>
+                        {item.tenSanPham}
+                      </td>
+                      <td style={{ padding: '12px 10px' }}>{stock} bó</td>
+                      <td style={{ padding: '12px 10px', fontWeight: 600, color: '#2563eb' }}>
+                        {Math.round(predicted)} bó
+                      </td>
+                      <td style={{ padding: '12px 10px', fontWeight: 700, color: '#e11d48' }}>
+                        +{Math.round(importQty)} bó
+                      </td>
+                      <td style={{ padding: '12px 10px' }}>
+                        <span
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: 999,
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            background: lowStock ? '#fee2e2' : '#dcfce7',
+                            color: lowStock ? '#b91c1c' : '#166534',
+                          }}
+                        >
+                          {lowStock ? 'Cần nhập gấp' : 'Tồn kho an toàn'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: QUẢN LÝ SẢN PHẨM */}
+      {activeTab === 'products' && (
+        <div className="panel" style={{ padding: 24 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+              marginBottom: 18,
+            }}
+          >
+            <h2 style={{ fontSize: '1.35rem', margin: 0 }}>
+              Danh Mục Hoa Tươi ({filteredProducts.length})
+            </h2>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ position: 'relative' }}>
+                <Search
+                  size={15}
+                  color="#9ca3af"
+                  style={{ position: 'absolute', left: 11, top: 11 }}
+                />
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Tìm tên hoa, tông màu..."
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  style={{ paddingLeft: 34, height: 36, fontSize: '0.86rem', width: 210 }}
+                />
               </div>
 
-              <div className="panel" style={{ padding: 24 }}>
-                <h2 style={{ fontSize: '1.35rem', marginBottom: 14 }}>
-                  Đối Chiếu Độ Chính Xác Các Mô Hình Học Máy
-                </h2>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.92rem' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid #f3f4f6', textAlign: 'left' }}>
-                      <th style={{ padding: 12 }}>Thuật toán</th>
-                      <th style={{ padding: 12 }}>Sai số tuyệt đối (MAE)</th>
-                      <th style={{ padding: 12 }}>Sai số toàn phương (RMSE)</th>
-                      <th style={{ padding: 12 }}>Kết luận triển khai</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr style={{ borderBottom: '1px solid #f3f4f6', background: '#fff1f2' }}>
-                      <td style={{ padding: 12, fontWeight: 700 }}>
-                        Linear Regression (Đang sử dụng)
-                      </td>
-                      <td style={{ padding: 12, fontWeight: 700, color: '#16a34a' }}>
-                        {modelMetrics.mae}
-                      </td>
-                      <td style={{ padding: 12, fontWeight: 700, color: '#16a34a' }}>
-                        {modelMetrics.rmse}
-                      </td>
-                      <td style={{ padding: 12, fontWeight: 600, color: '#be123c' }}>
-                        Sai số thấp nhất, tối ưu cho chuỗi thời gian 24 tháng
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style={{ padding: 12 }}>Random Forest Regressor</td>
-                      <td style={{ padding: 12 }}>{modelMetrics.rfMae}</td>
-                      <td style={{ padding: 12 }}>{modelMetrics.rfRmse}</td>
-                      <td style={{ padding: 12, color: '#6b7280' }}>Mô hình đối chứng</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <button type="button" onClick={openCreateProduct} className="btn btn-primary btn-sm">
+                <Plus size={16} /> Thêm mẫu hoa mới
+              </button>
             </div>
-          )}
-        </>
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+              <thead>
+                <tr
+                  style={{
+                    borderBottom: '2px solid #f3f4f6',
+                    textAlign: 'left',
+                    color: '#6b7280',
+                    fontSize: '0.82rem',
+                  }}
+                >
+                  <th style={{ padding: '12px 10px' }}>Hình ảnh</th>
+                  <th style={{ padding: '12px 10px' }}>Tên bó hoa</th>
+                  <th style={{ padding: '12px 10px' }}>Danh mục</th>
+                  <th style={{ padding: '12px 10px' }}>Tông màu</th>
+                  <th style={{ padding: '12px 10px' }}>Giá bán</th>
+                  <th style={{ padding: '12px 10px' }}>Tồn kho</th>
+                  <th style={{ padding: '12px 10px', textAlign: 'right' }}>Thao tác</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredProducts.map((sp) => {
+                  const catName =
+                    sp.tenDanhMuc ||
+                    FLOWER_CATEGORIES.find((c) => c.id === sp.maDanhMuc)?.name ||
+                    'Bó hoa tươi nghệ thuật';
+                  return (
+                    <tr key={sp.maSanPham} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                      <td style={{ padding: '10px' }}>
+                        <img
+                          src={getFlowerImage(sp)}
+                          alt={sp.tenSanPham}
+                          style={{
+                            width: 52,
+                            height: 52,
+                            borderRadius: 10,
+                            objectFit: 'cover',
+                            border: '1px solid #f3f4f6',
+                          }}
+                        />
+                      </td>
+                      <td style={{ padding: '10px', fontWeight: 600 }}>{sp.tenSanPham}</td>
+                      <td style={{ padding: '10px', color: '#4b5563', fontSize: '0.84rem' }}>
+                        {catName}
+                      </td>
+                      <td style={{ padding: '10px' }}>
+                        <span
+                          style={{
+                            background: '#fff1f2',
+                            color: '#be123c',
+                            padding: '3px 10px',
+                            borderRadius: 999,
+                            fontSize: '0.8rem',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {sp.tongMauSac || 'Tông Hồng'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px', fontWeight: 700, color: '#e11d48' }}>
+                        {formatVND(sp.giaBan)}
+                      </td>
+                      <td style={{ padding: '10px' }}>{sp.soLuongTon} bó</td>
+                      <td style={{ padding: '10px', textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            onClick={() => openEditProduct(sp)}
+                            className="btn btn-outline btn-sm"
+                          >
+                            <Edit2 size={14} /> Sửa
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteProduct(sp)}
+                            className="btn btn-outline btn-sm"
+                            style={{ color: '#e11d48' }}
+                            title="Xóa mẫu hoa"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: BIỂU ĐỒ & ĐỐI CHIẾU MÔ HÌNH */}
+      {activeTab === 'charts' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 22 }}>
+          <div className="panel" style={{ padding: 24 }}>
+            <h2 style={{ fontSize: '1.35rem', marginBottom: 6 }}>
+              Biểu Đồ Top Bó Hoa Đề Xuất Nhập Tháng Tới
+            </h2>
+            <p style={{ fontSize: '0.86rem', color: '#6b7280', marginBottom: 18 }}>
+              So sánh trực quan giữa tồn kho hiện tại và sản lượng dự báo từ mô hình AI.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {forecasts.slice(0, 6).map((item, idx) => {
+                const predicted = Math.round(
+                  item.duBaoThangToi ?? item.soLuongDuBao ?? item.predictedSales ?? 30
+                );
+                const stock = item.soLuongTon ?? 15;
+                const maxVal = 60;
+                const predPct = Math.min(100, Math.round((predicted / maxVal) * 100));
+                const stockPct = Math.min(100, Math.round((stock / maxVal) * 100));
+
+                return (
+                  <div key={item.maSanPham ?? idx}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        fontSize: '0.88rem',
+                        marginBottom: 4,
+                      }}
+                    >
+                      <b>{item.tenSanPham}</b>
+                      <span style={{ color: '#6b7280' }}>
+                        Tồn: <b>{stock}</b> bó &bull; Dự báo bán:{' '}
+                        <b style={{ color: '#e11d48' }}>{predicted}</b> bó
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        height: 12,
+                        background: '#f3f4f6',
+                        borderRadius: 999,
+                        overflow: 'hidden',
+                        position: 'relative',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${predPct}%`,
+                          height: '100%',
+                          background: '#fb7185',
+                          borderRadius: 999,
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: `${stockPct}%`,
+                          height: '100%',
+                          background: '#16a34a',
+                          borderRadius: 999,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                gap: 18,
+                marginTop: 14,
+                fontSize: '0.82rem',
+                color: '#4b5563',
+              }}
+            >
+              <span>🟢 Tồn kho hiện tại</span>
+              <span>🌸 Sản lượng AI dự báo tháng tới</span>
+            </div>
+          </div>
+
+          <div className="panel" style={{ padding: 24 }}>
+            <h2 style={{ fontSize: '1.35rem', marginBottom: 14 }}>
+              Đối Chiếu Độ Chính Xác Các Mô Hình Học Máy
+            </h2>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.92rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #f3f4f6', textAlign: 'left' }}>
+                  <th style={{ padding: 12 }}>Thuật toán</th>
+                  <th style={{ padding: 12 }}>Sai số tuyệt đối (MAE)</th>
+                  <th style={{ padding: 12 }}>Sai số toàn phương (RMSE)</th>
+                  <th style={{ padding: 12 }}>Kết luận triển khai</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ borderBottom: '1px solid #f3f4f6', background: '#fff1f2' }}>
+                  <td style={{ padding: 12, fontWeight: 700 }}>
+                    Linear Regression (Đang sử dụng)
+                  </td>
+                  <td style={{ padding: 12, fontWeight: 700, color: '#16a34a' }}>
+                    {modelMetrics.mae}
+                  </td>
+                  <td style={{ padding: 12, fontWeight: 700, color: '#16a34a' }}>
+                    {modelMetrics.rmse}
+                  </td>
+                  <td style={{ padding: 12, fontWeight: 600, color: '#be123c' }}>
+                    Sai số thấp nhất, tối ưu cho chuỗi thời gian 24 tháng
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: 12 }}>Random Forest Regressor</td>
+                  <td style={{ padding: 12 }}>{modelMetrics.rfMae}</td>
+                  <td style={{ padding: 12 }}>{modelMetrics.rfRmse}</td>
+                  <td style={{ padding: 12, color: '#6b7280' }}>Mô hình đối chứng</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {/* Modal Chi tiết đầy đủ đơn hàng */}
@@ -2513,7 +2532,7 @@ export default function AdminDashboard() {
         );
       })()}
 
-      {/* Modal Thêm / Sửa sản phẩm (Tải ảnh từ thiết bị + Viết tay tông màu) */}
+      {/* Modal Thêm / Sửa sản phẩm */}
       {productModal && (
         <div className="modal-backdrop">
           <div

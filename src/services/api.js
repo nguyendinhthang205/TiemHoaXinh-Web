@@ -16,6 +16,19 @@ const PRODUCT_SYNC_KEY = 'thx_product_overrides';
 const HOTLINE_STORAGE_KEY = 'thx_hotline_number';
 export const DEFAULT_HOTLINE = '0905 123 456';
 
+async function fetchCloudWithTimeout(options = {}, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(CLOUD_BIN_URL, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function getHotlineNumber() {
   try {
     const saved = localStorage.getItem(HOTLINE_STORAGE_KEY);
@@ -27,7 +40,7 @@ export function getHotlineNumber() {
 
 export async function syncHotlineFromCloud() {
   try {
-    const res = await fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' });
+    const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 4500);
     if (!res.ok) return getHotlineNumber();
     const raw = await res.json();
     const remoteHotline = typeof raw?.__hotline__ === 'string' ? raw.__hotline__.trim() : '';
@@ -37,7 +50,7 @@ export async function syncHotlineFromCloud() {
       return remoteHotline;
     }
   } catch {
-    // Bỏ qua nếu mạng gián đoạn
+    // Bỏ qua nếu quá thời gian chờ
   }
   return getHotlineNumber();
 }
@@ -52,16 +65,19 @@ export function saveHotlineNumber(newPhone) {
     // Bỏ qua
   }
 
-  fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' })
+  fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5000)
     .then((res) => (res.ok ? res.json() : {}))
     .then((raw) => {
       const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
       safeBin.__hotline__ = cleaned;
-      return fetch(CLOUD_BIN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(safeBin),
-      });
+      return fetchCloudWithTimeout(
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(safeBin),
+        },
+        5000
+      );
     })
     .catch(() => {});
 
@@ -81,7 +97,7 @@ export function readLocalOrderMeta() {
 export async function syncOrderMetaFromCloud() {
   const localMeta = readLocalOrderMeta();
   try {
-    const res = await fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' });
+    const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5000);
     if (!res.ok) return localMeta;
     const raw = await res.json();
     const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
@@ -129,11 +145,14 @@ export async function syncOrderMetaFromCloud() {
 
     if (shouldPushBack) {
       safeBin.__order_meta__ = remoteMeta;
-      await fetch(CLOUD_BIN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(safeBin),
-      });
+      await fetchCloudWithTimeout(
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(safeBin),
+        },
+        5000
+      );
     }
 
     return merged;
@@ -163,7 +182,7 @@ export async function writeOrderMeta(orderId, patch) {
   }
 
   try {
-    const res = await fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' });
+    const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5000);
     const raw = res.ok ? await res.json() : {};
     const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
     const remoteMeta =
@@ -177,11 +196,14 @@ export async function writeOrderMeta(orderId, patch) {
     };
     safeBin.__order_meta__ = remoteMeta;
 
-    await fetch(CLOUD_BIN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(safeBin),
-    });
+    await fetchCloudWithTimeout(
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(safeBin),
+      },
+      5000
+    );
   } catch {
     // Giữ bản lưu cục bộ nếu mạng gián đoạn
   }
@@ -202,7 +224,7 @@ export function getProductOverrides() {
 export async function syncProductOverridesFromCloud() {
   const localOverrides = getProductOverrides();
   try {
-    const res = await fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' });
+    const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5000);
     if (!res.ok) return localOverrides;
     const raw = await res.json();
     const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
@@ -217,7 +239,6 @@ export async function syncProductOverridesFromCloud() {
     let localChanged = false;
     let shouldPushBack = false;
 
-    // 1. Tải ảnh & thông tin cập nhật mới nhất từ đám mây về thiết bị hiện tại
     Object.entries(remoteOverrides).forEach(([key, rItem]) => {
       if (!rItem || typeof rItem !== 'object') return;
       const lItem = merged[key];
@@ -231,7 +252,6 @@ export async function syncProductOverridesFromCloud() {
       }
     });
 
-    // 2. Đẩy các ảnh Admin đã chọn trên máy tính nhưng chưa lên đám mây
     Object.entries(localOverrides).forEach(([key, lItem]) => {
       if (!lItem || typeof lItem !== 'object') return;
       const rItem = remoteOverrides[key];
@@ -252,11 +272,14 @@ export async function syncProductOverridesFromCloud() {
 
     if (shouldPushBack) {
       safeBin.__product_overrides__ = remoteOverrides;
-      await fetch(CLOUD_BIN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(safeBin),
-      });
+      await fetchCloudWithTimeout(
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(safeBin),
+        },
+        5000
+      );
     }
 
     return merged;
@@ -282,11 +305,11 @@ export async function saveProductOverride(key, patch) {
     localStorage.setItem(PRODUCT_SYNC_KEY, JSON.stringify(current));
     window.dispatchEvent(new Event('thx_products_updated'));
   } catch {
-    // Bỏ qua nếu bộ nhớ cục bộ đầy
+    // Bỏ qua
   }
 
   try {
-    const res = await fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' });
+    const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5000);
     const raw = res.ok ? await res.json() : {};
     const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
     const remoteOverrides =
@@ -300,11 +323,14 @@ export async function saveProductOverride(key, patch) {
     };
     safeBin.__product_overrides__ = remoteOverrides;
 
-    await fetch(CLOUD_BIN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(safeBin),
-    });
+    await fetchCloudWithTimeout(
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(safeBin),
+      },
+      5000
+    );
   } catch {
     // Giữ bản lưu cục bộ nếu mạng gián đoạn
   }
