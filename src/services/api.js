@@ -25,6 +25,23 @@ export function getHotlineNumber() {
   }
 }
 
+export async function syncHotlineFromCloud() {
+  try {
+    const res = await fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' });
+    if (!res.ok) return getHotlineNumber();
+    const raw = await res.json();
+    const remoteHotline = typeof raw?.__hotline__ === 'string' ? raw.__hotline__.trim() : '';
+    if (remoteHotline && remoteHotline !== getHotlineNumber()) {
+      localStorage.setItem(HOTLINE_STORAGE_KEY, remoteHotline);
+      window.dispatchEvent(new Event('thx_hotline_updated'));
+      return remoteHotline;
+    }
+  } catch {
+    // Bỏ qua nếu mạng gián đoạn
+  }
+  return getHotlineNumber();
+}
+
 export function saveHotlineNumber(newPhone) {
   const cleaned = String(newPhone || '').trim() || DEFAULT_HOTLINE;
   try {
@@ -32,8 +49,22 @@ export function saveHotlineNumber(newPhone) {
     window.dispatchEvent(new Event('thx_hotline_updated'));
     window.dispatchEvent(new Event('storage'));
   } catch {
-    // Bỏ qua nếu trình duyệt chặn bộ nhớ cục bộ
+    // Bỏ qua
   }
+
+  fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' })
+    .then((res) => (res.ok ? res.json() : {}))
+    .then((raw) => {
+      const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+      safeBin.__hotline__ = cleaned;
+      return fetch(CLOUD_BIN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(safeBin),
+      });
+    })
+    .catch(() => {});
+
   return cleaned;
 }
 
@@ -53,14 +84,19 @@ export async function syncOrderMetaFromCloud() {
     const res = await fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' });
     if (!res.ok) return localMeta;
     const raw = await res.json();
+    const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
     const remoteMeta =
-      raw && typeof raw.__order_meta__ === 'object' && !Array.isArray(raw.__order_meta__)
-        ? raw.__order_meta__
+      safeBin.__order_meta__ &&
+      typeof safeBin.__order_meta__ === 'object' &&
+      !Array.isArray(safeBin.__order_meta__)
+        ? safeBin.__order_meta__
         : {};
 
     const merged = { ...localMeta };
-    let changed = false;
+    let localChanged = false;
+    let shouldPushBack = false;
 
+    // 1. Nhận trạng thái mới nhất từ đám mây về máy hiện tại
     Object.entries(remoteMeta).forEach(([orderId, rItem]) => {
       if (!rItem || typeof rItem !== 'object') return;
       const lItem = merged[orderId];
@@ -69,15 +105,39 @@ export async function syncOrderMetaFromCloud() {
       if (!lItem || rTime >= lTime) {
         if (JSON.stringify(lItem) !== JSON.stringify(rItem)) {
           merged[orderId] = { ...(lItem || {}), ...rItem };
-          changed = true;
+          localChanged = true;
         }
       }
     });
 
-    if (changed) {
+    // 2. Đẩy các thay đổi cục bộ chưa có trên đám mây lên (ví dụ đơn #763 Admin vừa chỉnh)
+    Object.entries(localMeta).forEach(([orderId, lItem]) => {
+      if (!lItem || typeof lItem !== 'object') return;
+      const rItem = remoteMeta[orderId];
+      const lTime = Number(lItem.updatedAt || 0);
+      const rTime = Number(rItem?.updatedAt || 0);
+      if ((!rItem && lItem.statusOverride) || lTime > rTime) {
+        const stamped = { ...lItem, updatedAt: lTime || Date.now() };
+        merged[orderId] = stamped;
+        remoteMeta[orderId] = stamped;
+        shouldPushBack = true;
+      }
+    });
+
+    if (localChanged || shouldPushBack) {
       localStorage.setItem(ORDER_META_KEY, JSON.stringify(merged));
       window.dispatchEvent(new Event('thx_orders_updated'));
     }
+
+    if (shouldPushBack) {
+      safeBin.__order_meta__ = remoteMeta;
+      await fetch(CLOUD_BIN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(safeBin),
+      });
+    }
+
     return merged;
   } catch {
     return localMeta;
@@ -187,7 +247,6 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   let token = sessionStorage.getItem('thx_token') || sessionStorage.getItem('token');
 
-  // Tự động nhận và chuyển token từ localStorage sang sessionStorage riêng của từng tab
   if (!token) {
     const legacyToken = localStorage.getItem('thx_token') || localStorage.getItem('token');
     if (legacyToken) {

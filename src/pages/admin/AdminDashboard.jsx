@@ -40,6 +40,9 @@ import api, {
   saveProductOverride,
   getHotlineNumber,
   saveHotlineNumber,
+  readLocalOrderMeta,
+  syncOrderMetaFromCloud,
+  writeOrderMeta,
 } from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import {
@@ -208,7 +211,7 @@ export default function AdminDashboard() {
     rfMae: 3.12,
     rfRmse: 4.05,
   });
-  const [orderMetaMap, setOrderMetaMap] = useState({});
+  const [orderMetaMap, setOrderMetaMap] = useState(() => readLocalOrderMeta());
 
   const [conversations, setConversations] = useState([]);
   const [selectedConvId, setSelectedConvId] = useState(null);
@@ -253,19 +256,26 @@ export default function AdminDashboard() {
     syncChatsFromCloud().then(() => syncChats());
 
     const handleChatEvent = () => syncChats();
+    const handleOrderMetaEvent = () => setOrderMetaMap(readLocalOrderMeta());
+
     window.addEventListener('thx_chat_updated', handleChatEvent);
+    window.addEventListener('thx_orders_updated', handleOrderMetaEvent);
     window.addEventListener('storage', handleChatEvent);
+    window.addEventListener('storage', handleOrderMetaEvent);
     return () => {
       window.removeEventListener('thx_chat_updated', handleChatEvent);
+      window.removeEventListener('thx_orders_updated', handleOrderMetaEvent);
       window.removeEventListener('storage', handleChatEvent);
+      window.removeEventListener('storage', handleOrderMetaEvent);
     };
   }, [syncChats]);
 
-  // Tự động đồng bộ tin nhắn mới từ khách hàng (điện thoại / trình duyệt khác)
+  // Tự động đồng bộ tin nhắn & trạng thái đơn hàng 2 chiều qua đám mây
   useEffect(() => {
-    const intervalMs = activeTab === 'messages' ? 3000 : 6000;
+    const intervalMs = activeTab === 'messages' ? 3000 : 5000;
     const timer = setInterval(() => {
       syncChatsFromCloud().then(() => syncChats());
+      syncOrderMetaFromCloud().then((latest) => setOrderMetaMap(latest));
     }, intervalMs);
     return () => clearInterval(timer);
   }, [activeTab, syncChats]);
@@ -289,24 +299,9 @@ export default function AdminDashboard() {
     activeConversation?.unreadByAdmin,
   ]);
 
-  const readLocalMeta = () => {
-    try {
-      const raw = localStorage.getItem('thx_order_meta');
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
-  };
-
-  const writeLocalMeta = (orderId, patch) => {
-    try {
-      const current = readLocalMeta();
-      current[orderId] = { ...(current[orderId] || {}), ...patch };
-      localStorage.setItem('thx_order_meta', JSON.stringify(current));
-      setOrderMetaMap(current);
-    } catch {
-      // Bỏ qua lỗi bộ nhớ cục bộ
-    }
+  const writeLocalMeta = async (orderId, patch) => {
+    const updated = await writeOrderMeta(orderId, patch);
+    setOrderMetaMap(updated);
   };
 
   const fetchWithRetry = async (url, retries = 1) => {
@@ -325,8 +320,9 @@ export default function AdminDashboard() {
     try {
       setLoading(true);
       setApiError('');
-      const localMeta = readLocalMeta();
-      setOrderMetaMap(localMeta);
+
+      const syncedMeta = await syncOrderMetaFromCloud();
+      setOrderMetaMap(syncedMeta);
 
       const [spResult, ordResult] = await Promise.allSettled([
         fetchWithRetry('/SanPham', 1),
@@ -516,7 +512,7 @@ export default function AdminDashboard() {
           // Bỏ qua nếu đã xác nhận trước đó
         }
       }
-      writeLocalMeta(orderId, patch);
+      await writeLocalMeta(orderId, patch);
 
       setOrders((prev) =>
         prev.map((item) =>
@@ -535,7 +531,7 @@ export default function AdminDashboard() {
         }));
       }
 
-      showToast(`Đã cập nhật đơn #${orderId} sang "${targetInfo.label}"`);
+      showToast(`Đã đồng bộ đơn #${orderId} sang "${targetInfo.label}"!`);
     } finally {
       setUpdatingOrderId(null);
     }
@@ -550,7 +546,7 @@ export default function AdminDashboard() {
       } catch {
         // Đồng bộ trạng thái thanh toán
       }
-      writeLocalMeta(orderId, { isPaid: true });
+      await writeLocalMeta(orderId, { isPaid: true });
       if (selectedOrder && selectedOrder.maDonHang === orderId) {
         setSelectedOrder((prev) => ({
           ...prev,
