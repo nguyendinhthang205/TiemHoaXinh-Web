@@ -3,21 +3,22 @@ import api from '../services/api';
 
 const AppContext = createContext(null);
 
-function clearLegacyLocalAuth() {
-  try {
-    localStorage.removeItem('thx_token');
-    localStorage.removeItem('thx_user');
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-  } catch {
-    // Bỏ qua
-  }
+function isAdminAccount(account) {
+  if (!account) return false;
+  const roleStr = String(
+    account.vaiTro || account.role || account.quyen || ''
+  ).toLowerCase();
+  return (
+    roleStr.includes('admin') ||
+    roleStr.includes('quản trị') ||
+    String(account.email || '').toLowerCase().includes('admin') ||
+    String(account.hoTen || '').trim().toLowerCase() === 'admin'
+  );
 }
 
 export function AppProvider({ children }) {
   const [user, setUser] = useState(() => {
     try {
-      clearLegacyLocalAuth();
       const saved = sessionStorage.getItem('thx_user');
       return saved ? JSON.parse(saved) : null;
     } catch {
@@ -38,7 +39,8 @@ export function AppProvider({ children }) {
   }, []);
 
   const fetchCart = useCallback(async () => {
-    if (!sessionStorage.getItem('thx_token')) {
+    const token = sessionStorage.getItem('thx_token');
+    if (!token || isAdminAccount(user)) {
       setCartItems([]);
       return;
     }
@@ -47,30 +49,38 @@ export function AppProvider({ children }) {
       const items = Array.isArray(res.data) ? res.data : res.data?.items || [];
       setCartItems(items);
     } catch {
-      // Bỏ qua nếu phiên hết hạn
+      // Bỏ qua nếu không tải được giỏ hàng
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     fetchCart();
-  }, [user, fetchCart]);
+  }, [fetchCart]);
 
   const login = async (email, matKhau) => {
     const res = await api.post('/Auth/login', { email, matKhau });
-    const { token, nguoiDung } = res.data;
-    clearLegacyLocalAuth();
-    sessionStorage.setItem('thx_token', token);
+    const data = res.data || {};
+    const token = data.token || data.Token || data.accessToken || '';
+    const nguoiDung = data.nguoiDung || data.NguoiDung || data.user || data;
+
+    if (token) {
+      sessionStorage.setItem('thx_token', token);
+    }
     sessionStorage.setItem('thx_user', JSON.stringify(nguoiDung));
     setUser(nguoiDung);
-    showToast(`Chào mừng ${nguoiDung.hoTen} quay trở lại Tiệm Hoa Xinh!`);
+    showToast(`Chào mừng ${nguoiDung.hoTen || 'bạn'} quay trở lại Tiệm Hoa Xinh!`);
     return nguoiDung;
   };
 
   const register = async (payload) => {
     const res = await api.post('/Auth/register', payload);
-    const { token, nguoiDung } = res.data;
-    clearLegacyLocalAuth();
-    sessionStorage.setItem('thx_token', token);
+    const data = res.data || {};
+    const token = data.token || data.Token || data.accessToken || '';
+    const nguoiDung = data.nguoiDung || data.NguoiDung || data.user || data;
+
+    if (token) {
+      sessionStorage.setItem('thx_token', token);
+    }
     sessionStorage.setItem('thx_user', JSON.stringify(nguoiDung));
     setUser(nguoiDung);
     showToast('Đăng ký tài khoản thành công!');
@@ -78,7 +88,10 @@ export function AppProvider({ children }) {
   };
 
   const logout = () => {
-    clearLegacyLocalAuth();
+    localStorage.removeItem('thx_token');
+    localStorage.removeItem('thx_user');
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
     sessionStorage.removeItem('thx_token');
     sessionStorage.removeItem('thx_user');
     sessionStorage.removeItem('token');

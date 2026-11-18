@@ -207,17 +207,6 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    const status = error?.response?.status;
-    const reqUrl = String(error?.config?.url || '');
-    if (status === 401 && !reqUrl.includes('/Auth/login')) {
-      sessionStorage.removeItem('thx_token');
-      sessionStorage.removeItem('thx_user');
-      sessionStorage.removeItem('token');
-      sessionStorage.removeItem('user');
-      if (!window.location.pathname.includes('/login')) {
-        window.location.href = '/login';
-      }
-    }
     return Promise.reject(error);
   }
 );
