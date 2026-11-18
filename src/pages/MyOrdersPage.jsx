@@ -15,8 +15,15 @@ import {
   Truck,
   Store,
   Check,
+  RefreshCw,
 } from 'lucide-react';
-import api, { formatVND, getFlowerImage } from '../services/api';
+import api, {
+  formatVND,
+  getFlowerImage,
+  readLocalOrderMeta,
+  syncOrderMetaFromCloud,
+  writeOrderMeta,
+} from '../services/api';
 import { useApp } from '../context/AppContext';
 
 function extractCustomerRawStatus(order, meta = {}) {
@@ -111,36 +118,17 @@ export default function MyOrdersPage() {
   const { user, showToast } = useApp();
   const [orders, setOrders] = useState([]);
   const [productMap, setProductMap] = useState({});
-  const [orderMetaMap, setOrderMetaMap] = useState({});
+  const [orderMetaMap, setOrderMetaMap] = useState(() => readLocalOrderMeta());
   const [loading, setLoading] = useState(true);
   const [cancelingId, setCancelingId] = useState(null);
   const [qrOrder, setQrOrder] = useState(null);
-
-  const readLocalMeta = () => {
-    try {
-      const raw = localStorage.getItem('thx_order_meta');
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
-  };
-
-  const writeLocalMeta = (orderId, patch) => {
-    try {
-      const current = readLocalMeta();
-      current[orderId] = { ...(current[orderId] || {}), ...patch };
-      localStorage.setItem('thx_order_meta', JSON.stringify(current));
-      setOrderMetaMap(current);
-    } catch {
-      // Bỏ qua
-    }
-  };
 
   const loadOrders = useCallback(async () => {
     if (!user) return;
     try {
       setLoading(true);
-      setOrderMetaMap(readLocalMeta());
+      const syncedMeta = await syncOrderMetaFromCloud();
+      setOrderMetaMap(syncedMeta);
 
       const spRes = await api.get('/SanPham').catch(() => ({ data: [] }));
       const spList = Array.isArray(spRes.data) ? spRes.data : spRes.data?.items || [];
@@ -202,6 +190,24 @@ export default function MyOrdersPage() {
     loadOrders();
   }, [loadOrders]);
 
+  // Tự động kiểm tra trạng thái đơn hàng mới nhất từ Admin mỗi 4 giây
+  useEffect(() => {
+    if (!user) return undefined;
+    const handleMetaEvent = () => setOrderMetaMap(readLocalOrderMeta());
+    window.addEventListener('thx_orders_updated', handleMetaEvent);
+    window.addEventListener('storage', handleMetaEvent);
+
+    const timer = setInterval(() => {
+      syncOrderMetaFromCloud().then((latest) => setOrderMetaMap(latest));
+    }, 4000);
+
+    return () => {
+      window.removeEventListener('thx_orders_updated', handleMetaEvent);
+      window.removeEventListener('storage', handleMetaEvent);
+      clearInterval(timer);
+    };
+  }, [user]);
+
   const handleCancelOrder = async (orderId) => {
     if (!window.confirm(`Bạn có chắc muốn hủy đơn hàng #${orderId} không?`)) return;
     try {
@@ -211,7 +217,8 @@ export default function MyOrdersPage() {
       } catch {
         await api.put(`/DonHang/${orderId}/status`, { trangThai: 'Cancelled' }).catch(() => {});
       }
-      writeLocalMeta(orderId, { statusOverride: 'Cancelled' });
+      const nextMeta = await writeOrderMeta(orderId, { statusOverride: 'Cancelled' });
+      setOrderMetaMap(nextMeta);
       setOrders((prev) =>
         prev.map((o) => (o.maDonHang === orderId ? { ...o, trangThai: 'Cancelled' } : o))
       );
@@ -266,7 +273,26 @@ export default function MyOrdersPage() {
   }
 
   return (
-    <div className="container" style={{ marginTop: 32, marginBottom: 48 }}>
+    <div className="container" style={{ marginTop: 32, marginBottom: 64 }}>
+      <style>{`
+        .thx-order-steps {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 8px;
+          padding: 16px 12px;
+          margin: 14px 0 4px;
+          background: #fafafa;
+          border-radius: 14px;
+          border: 1px solid #f3f4f6;
+        }
+        @media (max-width: 600px) {
+          .thx-order-steps {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px 8px;
+          }
+        }
+      `}</style>
+
       <div
         style={{
           display: 'flex',
@@ -277,10 +303,21 @@ export default function MyOrdersPage() {
           gap: 12,
         }}
       >
-        <h1 style={{ fontSize: '2rem' }}>Đơn Hàng Của Tôi ({orders.length})</h1>
-        <Link to="/shop" className="btn btn-outline btn-sm">
-          + Đặt thêm hoa mới
-        </Link>
+        <h1 style={{ fontSize: '1.85rem' }}>Đơn Hàng Của Tôi ({orders.length})</h1>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            onClick={loadOrders}
+            disabled={loading}
+            className="btn btn-outline btn-sm"
+          >
+            <RefreshCw size={14} />
+            <span>{loading ? 'Đang đồng bộ...' : 'Cập nhật trạng thái'}</span>
+          </button>
+          <Link to="/shop" className="btn btn-primary btn-sm">
+            + Đặt thêm hoa mới
+          </Link>
+        </div>
       </div>
 
       {loading ? (
@@ -351,7 +388,7 @@ export default function MyOrdersPage() {
                 ];
 
             return (
-              <div key={order.maDonHang} className="panel" style={{ padding: 24 }}>
+              <div key={order.maDonHang} className="panel" style={{ padding: 20 }}>
                 <div
                   style={{
                     display: 'flex',
@@ -388,7 +425,7 @@ export default function MyOrdersPage() {
                         : 'Ship tận nơi'}
                     </span>
                     <span style={{ color: '#6b7280', fontSize: '0.86rem' }}>
-                      • Đặt lúc {formatDateTime(order.ngayDat || order.thoiGianDat)}
+                      &bull; Đặt lúc {formatDateTime(order.ngayDat || order.thoiGianDat)}
                     </span>
                   </div>
 
@@ -433,18 +470,7 @@ export default function MyOrdersPage() {
 
                 {/* Thanh tiến trình 4 giai đoạn */}
                 {!stInfo.isCancelled && (
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(4, 1fr)',
-                      gap: 8,
-                      padding: '16px 12px',
-                      margin: '14px 0 4px',
-                      background: '#fafafa',
-                      borderRadius: 14,
-                      border: '1px solid #f3f4f6',
-                    }}
-                  >
+                  <div className="thx-order-steps">
                     {trackingSteps.map((step, idx) => {
                       const done = idx <= stInfo.step;
                       const isCurrent = idx === stInfo.step;
@@ -718,8 +744,12 @@ export default function MyOrdersPage() {
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
               <button
                 type="button"
-                onClick={() => {
-                  writeLocalMeta(qrOrder.maDonHang, { isPaid: true, paymentMethod: 'VietQR' });
+                onClick={async () => {
+                  const nextMeta = await writeOrderMeta(qrOrder.maDonHang, {
+                    isPaid: true,
+                    paymentMethod: 'VietQR',
+                  });
+                  setOrderMetaMap(nextMeta);
                   setQrOrder(null);
                   showToast('Đã xác nhận thanh toán online qua web (VietQR)!');
                 }}

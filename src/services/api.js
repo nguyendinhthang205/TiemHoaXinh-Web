@@ -10,6 +10,8 @@ export const AI_BASE_URL = (
 ).replace(/\/+$/, '');
 export const AI_URL = AI_BASE_URL;
 
+const CLOUD_BIN_URL = 'https://api.npoint.io/639a3cda635df1c41eb4';
+const ORDER_META_KEY = 'thx_order_meta';
 const PRODUCT_SYNC_KEY = 'thx_product_overrides';
 const HOTLINE_STORAGE_KEY = 'thx_hotline_number';
 export const DEFAULT_HOTLINE = '0905 123 456';
@@ -30,9 +32,103 @@ export function saveHotlineNumber(newPhone) {
     window.dispatchEvent(new Event('thx_hotline_updated'));
     window.dispatchEvent(new Event('storage'));
   } catch {
-    // Bỏ qua nếu trình duyệt chặn bộ nhớ cục bộ
+    // Bỏ qua
   }
   return cleaned;
+}
+
+export function readLocalOrderMeta() {
+  try {
+    const raw = localStorage.getItem(ORDER_META_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function syncOrderMetaFromCloud() {
+  const localMeta = readLocalOrderMeta();
+  try {
+    const res = await fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' });
+    if (!res.ok) return localMeta;
+    const raw = await res.json();
+    const remoteMeta =
+      raw && typeof raw.__order_meta__ === 'object' && !Array.isArray(raw.__order_meta__)
+        ? raw.__order_meta__
+        : {};
+
+    const merged = { ...localMeta };
+    let changed = false;
+
+    Object.entries(remoteMeta).forEach(([orderId, rItem]) => {
+      if (!rItem || typeof rItem !== 'object') return;
+      const lItem = merged[orderId];
+      const rTime = Number(rItem.updatedAt || 0);
+      const lTime = Number(lItem?.updatedAt || 0);
+      if (!lItem || rTime >= lTime) {
+        if (JSON.stringify(lItem) !== JSON.stringify(rItem)) {
+          merged[orderId] = { ...(lItem || {}), ...rItem };
+          changed = true;
+        }
+      }
+    });
+
+    if (changed) {
+      localStorage.setItem(ORDER_META_KEY, JSON.stringify(merged));
+      window.dispatchEvent(new Event('thx_orders_updated'));
+    }
+    return merged;
+  } catch {
+    return localMeta;
+  }
+}
+
+export async function writeOrderMeta(orderId, patch) {
+  if (orderId == null) return readLocalOrderMeta();
+  const idStr = String(orderId);
+  const now = Date.now();
+
+  const localCurrent = readLocalOrderMeta();
+  const nextEntry = {
+    ...(localCurrent[idStr] || {}),
+    ...patch,
+    updatedAt: now,
+  };
+  localCurrent[idStr] = nextEntry;
+
+  try {
+    localStorage.setItem(ORDER_META_KEY, JSON.stringify(localCurrent));
+    window.dispatchEvent(new Event('thx_orders_updated'));
+  } catch {
+    // Bỏ qua lỗi bộ nhớ cục bộ
+  }
+
+  try {
+    const res = await fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' });
+    const raw = res.ok ? await res.json() : {};
+    const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const remoteMeta =
+      safeBin.__order_meta__ && typeof safeBin.__order_meta__ === 'object'
+        ? safeBin.__order_meta__
+        : {};
+
+    remoteMeta[idStr] = {
+      ...(remoteMeta[idStr] || {}),
+      ...nextEntry,
+    };
+    safeBin.__order_meta__ = remoteMeta;
+
+    await fetch(CLOUD_BIN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(safeBin),
+    });
+  } catch {
+    // Giữ bản lưu cục bộ nếu mạng gián đoạn
+  }
+
+  return localCurrent;
 }
 
 export function getProductOverrides() {
@@ -56,7 +152,7 @@ export function saveProductOverride(key, patch) {
     localStorage.setItem(PRODUCT_SYNC_KEY, JSON.stringify(current));
     window.dispatchEvent(new Event('thx_products_updated'));
   } catch {
-    // Bỏ qua nếu bộ nhớ trình duyệt đầy
+    // Bỏ qua
   }
 }
 
@@ -89,7 +185,7 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('thx_token') || localStorage.getItem('token');
+  const token = sessionStorage.getItem('thx_token') || sessionStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -114,10 +210,10 @@ api.interceptors.response.use(
     const status = error?.response?.status;
     const reqUrl = String(error?.config?.url || '');
     if (status === 401 && !reqUrl.includes('/Auth/login')) {
-      localStorage.removeItem('thx_token');
-      localStorage.removeItem('thx_user');
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+      sessionStorage.removeItem('thx_token');
+      sessionStorage.removeItem('thx_user');
+      sessionStorage.removeItem('token');
+      sessionStorage.removeItem('user');
       if (!window.location.pathname.includes('/login')) {
         window.location.href = '/login';
       }

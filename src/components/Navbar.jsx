@@ -44,6 +44,10 @@ export default function Navbar() {
     localStorage.removeItem('thx_user');
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    sessionStorage.removeItem('thx_token');
+    sessionStorage.removeItem('thx_user');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('user');
 
     if (typeof logout === 'function') {
       logout();

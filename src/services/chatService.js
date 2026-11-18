@@ -2,11 +2,22 @@ const NPOINT_URL = 'https://api.npoint.io/639a3cda635df1c41eb4';
 const CHAT_STORAGE_KEY = 'thx_support_chats_v1';
 const GUEST_ID_KEY = 'thx_chat_guest_id';
 
+function extractChatEntries(rawObj) {
+  if (!rawObj || typeof rawObj !== 'object' || Array.isArray(rawObj)) return {};
+  const result = {};
+  Object.entries(rawObj).forEach(([key, val]) => {
+    if (!key.startsWith('__') && val && typeof val === 'object' && Array.isArray(val.messages)) {
+      result[key] = val;
+    }
+  });
+  return result;
+}
+
 function readLocalChats() {
   try {
     const raw = localStorage.getItem(CHAT_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    return extractChatEntries(parsed);
   } catch {
     return {};
   }
@@ -14,42 +25,53 @@ function readLocalChats() {
 
 function writeLocalChats(data) {
   try {
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(data || {}));
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(extractChatEntries(data)));
     window.dispatchEvent(new Event('thx_chat_updated'));
   } catch {
     // Bỏ qua lỗi bộ nhớ cục bộ
   }
 }
 
-async function fetchLatestCloudChats() {
+async function fetchRawCloudBin() {
   try {
     const res = await fetch(NPOINT_URL, {
       method: 'GET',
       cache: 'no-store',
     });
-    if (!res.ok) return readLocalChats();
+    if (!res.ok) return null;
     const data = await res.json();
-    if (data && typeof data === 'object' && !Array.isArray(data)) {
-      return data;
-    }
-    return {};
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
   } catch {
-    return readLocalChats();
+    return null;
   }
 }
 
-async function pushCloudChats(data) {
-  writeLocalChats(data);
+async function fetchLatestCloudChats() {
+  const raw = await fetchRawCloudBin();
+  if (!raw) return readLocalChats();
+  return extractChatEntries(raw);
+}
+
+async function pushCloudChats(chatMap) {
+  const cleanChats = extractChatEntries(chatMap);
+  writeLocalChats(cleanChats);
   try {
+    const latestRaw = (await fetchRawCloudBin()) || {};
+    const nextBin = { ...latestRaw };
+    Object.keys(nextBin).forEach((k) => {
+      if (!k.startsWith('__')) delete nextBin[k];
+    });
+    Object.assign(nextBin, cleanChats);
+
     await fetch(NPOINT_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify(nextBin),
     });
   } catch {
-    // Giữ bản lưu cục bộ nếu mạng tạm gián đoạn
+    // Giữ bản lưu cục bộ nếu mạng gián đoạn
   }
 }
 
@@ -130,7 +152,6 @@ export async function sendCustomerMessage(user, text) {
     createdAt: nowIso,
   };
 
-  // Cập nhật ngay trên giao diện người gửi
   const localAll = readLocalChats();
   const localConv = buildConversationObject(localAll[convId], user, convId);
   localConv.messages = [...(localConv.messages || []), newMsg];
@@ -139,7 +160,6 @@ export async function sendCustomerMessage(user, text) {
   localAll[convId] = localConv;
   writeLocalChats(localAll);
 
-  // Đồng bộ với dữ liệu mới nhất trên đám mây để không đè mất tin nhắn từ máy khác
   const remoteAll = await fetchLatestCloudChats();
   const remoteConv = buildConversationObject(remoteAll[convId], user, convId);
   const exists = (remoteConv.messages || []).some((m) => m.id === newMsg.id);
