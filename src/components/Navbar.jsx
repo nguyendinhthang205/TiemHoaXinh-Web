@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   LayoutDashboard,
   ChevronRight,
+  Search,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -20,7 +21,10 @@ export default function Navbar() {
   const location = useLocation();
   const appCtx = useApp() || {};
   const { user, cartItems = [], logout, setUser } = appCtx;
+
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const roleStr = String(
     user?.vaiTro || user?.role || user?.quyen || ''
@@ -38,9 +42,9 @@ export default function Navbar() {
 
   useEffect(() => {
     setMobileMenuOpen(false);
+    setMobileSearchOpen(false);
   }, [location.pathname]);
 
-  // Khóa cuộn trang nền khi mở Overlay Drawer trên điện thoại
   useEffect(() => {
     if (!mobileMenuOpen) return undefined;
     const prevOverflow = document.body.style.overflow;
@@ -49,6 +53,18 @@ export default function Navbar() {
       document.body.style.overflow = prevOverflow;
     };
   }, [mobileMenuOpen]);
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    const cleaned = searchQuery.trim();
+    setMobileMenuOpen(false);
+    setMobileSearchOpen(false);
+    if (cleaned) {
+      navigate(`/shop?q=${encodeURIComponent(cleaned)}`);
+    } else {
+      navigate('/shop');
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('thx_token');
@@ -78,9 +94,9 @@ export default function Navbar() {
   const navLinkStyle = ({ isActive }) => ({
     textDecoration: 'none',
     fontWeight: isActive ? 700 : 500,
-    fontSize: '0.94rem',
+    fontSize: '0.92rem',
     color: isActive ? '#e11d48' : '#374151',
-    padding: '8px 4px',
+    padding: '8px 2px',
     borderBottom: isActive ? '2.5px solid #e11d48' : '2.5px solid transparent',
     transition: 'all 0.2s ease',
     whiteSpace: 'nowrap',
@@ -116,25 +132,32 @@ export default function Navbar() {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 14px;
+            gap: 12px;
             height: 70px;
+          }
+          .thx-desktop-search {
+            display: flex;
+            align-items: center;
+            position: relative;
+            width: 210px;
+            flex-shrink: 1;
           }
           .thx-desktop-nav {
             display: flex;
             align-items: center;
-            gap: 22px;
+            gap: 18px;
           }
           .thx-desktop-actions {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
           }
           .thx-mobile-actions {
             display: none;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
           }
-          .thx-cart-icon-btn {
+          .thx-icon-square-btn {
             position: relative;
             display: inline-flex;
             align-items: center;
@@ -146,6 +169,7 @@ export default function Navbar() {
             background: #ffffff;
             color: #1f2937;
             text-decoration: none;
+            cursor: pointer;
           }
           .thx-cart-badge {
             position: absolute;
@@ -163,6 +187,10 @@ export default function Navbar() {
             line-height: 1;
             border: 1.5px solid #ffffff;
           }
+          .thx-mobile-search-bar {
+            display: none;
+            padding: 0 0 12px;
+          }
           .thx-overlay-backdrop {
             position: fixed;
             inset: 0;
@@ -176,7 +204,7 @@ export default function Navbar() {
             top: 0;
             right: 0;
             bottom: 0;
-            width: min(310px, 82vw);
+            width: min(310px, 84vw);
             background: #ffffff;
             z-index: 99;
             display: flex;
@@ -195,16 +223,26 @@ export default function Navbar() {
             to { transform: translateX(0); }
           }
 
-          @media (max-width: 860px) {
+          @media (max-width: 1024px) {
+            .thx-desktop-search {
+              width: 170px;
+            }
+          }
+
+          @media (max-width: 900px) {
             .thx-nav-bar {
               height: 60px;
             }
+            .thx-desktop-search,
             .thx-desktop-nav,
             .thx-desktop-actions {
               display: none;
             }
             .thx-mobile-actions {
               display: flex;
+            }
+            .thx-mobile-search-bar {
+              display: block;
             }
           }
         `}</style>
@@ -216,7 +254,7 @@ export default function Navbar() {
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 10,
+              gap: 9,
               textDecoration: 'none',
               flexShrink: 0,
             }}
@@ -239,18 +277,42 @@ export default function Navbar() {
               <div
                 style={{
                   fontWeight: 800,
-                  fontSize: '1.08rem',
+                  fontSize: '1.05rem',
                   color: '#be123c',
                   lineHeight: 1.15,
                 }}
               >
                 Tiệm Hoa Xinh
               </div>
-              <div style={{ fontSize: '0.69rem', color: '#6b7280' }}>
+              <div style={{ fontSize: '0.68rem', color: '#6b7280' }}>
                 Fresh Floral &amp; Smart AI
               </div>
             </div>
           </Link>
+
+          {/* Thanh tìm kiếm trên máy tính */}
+          <form onSubmit={handleSearchSubmit} className="thx-desktop-search">
+            <Search
+              size={15}
+              color="#9ca3af"
+              style={{ position: 'absolute', left: 11, pointerEvents: 'none' }}
+            />
+            <input
+              type="text"
+              className="form-control"
+              placeholder="Tìm hoa hồng, tulip..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                height: 36,
+                paddingLeft: 32,
+                paddingRight: 10,
+                fontSize: '0.84rem',
+                borderRadius: 999,
+                background: '#f9fafb',
+              }}
+            />
+          </form>
 
           {/* Menu điều hướng trên máy tính */}
           <nav className="thx-desktop-nav">
@@ -277,12 +339,12 @@ export default function Navbar() {
                   border: 'none',
                   color: '#e11d48',
                   fontWeight: 600,
-                  fontSize: '0.94rem',
+                  fontSize: '0.92rem',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 5,
                   cursor: 'pointer',
-                  padding: '8px 4px',
+                  padding: '8px 2px',
                   whiteSpace: 'nowrap',
                 }}
               >
@@ -384,10 +446,19 @@ export default function Navbar() {
 
           {/* Thanh hành động gọn 1 hàng trên điện thoại */}
           <div className="thx-mobile-actions">
+            <button
+              type="button"
+              onClick={() => setMobileSearchOpen((v) => !v)}
+              className="thx-icon-square-btn"
+              aria-label="Tìm kiếm sản phẩm"
+            >
+              <Search size={18} />
+            </button>
+
             {!isAdmin && (
               <Link
                 to="/cart"
-                className="thx-cart-icon-btn"
+                className="thx-icon-square-btn"
                 aria-label={`Giỏ hàng (${cartCount} sản phẩm)`}
               >
                 <ShoppingCart size={18} />
@@ -424,7 +495,7 @@ export default function Navbar() {
               <Link
                 to="/login"
                 className="btn btn-primary btn-sm"
-                style={{ padding: '6px 11px', fontSize: '0.82rem' }}
+                style={{ padding: '6px 10px', fontSize: '0.8rem' }}
               >
                 Đăng nhập
               </Link>
@@ -451,6 +522,26 @@ export default function Navbar() {
             </button>
           </div>
         </div>
+
+        {/* Thanh tìm kiếm mở nhanh trên điện thoại */}
+        {mobileSearchOpen && (
+          <div className="container thx-mobile-search-bar">
+            <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="text"
+                autoFocus
+                className="form-control"
+                placeholder="Nhập tên hoa cần tìm (hồng, hướng dương...)"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ height: 38, fontSize: '0.88rem' }}
+              />
+              <button type="submit" className="btn btn-primary btn-sm" style={{ height: 38 }}>
+                Tìm
+              </button>
+            </form>
+          </div>
+        )}
       </header>
 
       {/* Overlay Drawer trượt đè lên nội dung kèm lớp phủ tối mờ */}
@@ -464,7 +555,6 @@ export default function Navbar() {
 
           <aside className="thx-overlay-drawer" aria-label="Menu điều hướng di động">
             <div>
-              {/* Đầu ngăn kéo */}
               <div
                 style={{
                   display: 'flex',
@@ -516,7 +606,6 @@ export default function Navbar() {
                 </button>
               </div>
 
-              {/* Danh sách trang điều hướng cốt lõi (chỉ mục đang chọn mới có nền hồng) */}
               <nav style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <NavLink to="/" end style={mobileLinkStyle}>
                   <span>Trang chủ</span>
@@ -542,9 +631,37 @@ export default function Navbar() {
                   </NavLink>
                 )}
               </nav>
+
+              {/* Nút Nhắn tin với Admin dạng viền mảnh (tách biệt rõ với trạng thái Active State) */}
+              {!isAdmin && (
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed #f3f4f6' }}>
+                  <button
+                    type="button"
+                    onClick={openChatBox}
+                    style={{
+                      width: '100%',
+                      padding: '11px 14px',
+                      borderRadius: 12,
+                      border: '1.5px solid #fecdd3',
+                      background: '#ffffff',
+                      color: '#be123c',
+                      fontWeight: 700,
+                      fontSize: '0.92rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <MessageCircle size={17} color="#e11d48" />
+                    <span>Nhắn tin tư vấn với Admin</span>
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* Chân ngăn kéo: Thông tin tài khoản & nút Đăng xuất dạng viền mảnh */}
+            {/* Chân ngăn kéo: Thông tin tài khoản & Đăng xuất */}
             <div
               style={{
                 paddingTop: 14,

@@ -7,6 +7,7 @@ import {
   RotateCcw,
   Gift,
   Wallet,
+  Palette,
 } from 'lucide-react';
 import api from '../services/api';
 import ProductCard from '../components/ProductCard';
@@ -21,25 +22,65 @@ const OCCASION_OPTIONS = [
   {
     id: 'birthday',
     label: '🎂 Sinh nhật',
-    keywords: ['sinh nhật', 'pastel', 'hồng', 'tulip', 'baby', 'công chúa', 'ngọt ngào', 'dâu', 'hướng dương'],
+    keywords: [
+      'sinh nhật',
+      'pastel',
+      'hồng',
+      'tulip',
+      'baby',
+      'công chúa',
+      'ngọt ngào',
+      'dâu',
+      'hướng dương',
+    ],
     categories: [1, 4],
   },
   {
     id: 'opening',
     label: '🎉 Khai trương',
-    keywords: ['khai trương', 'hồng phát', 'đại cát', 'kệ hoa', 'lẵng hoa', 'vàng', 'đỏ', 'hướng dương', 'lan hồ điệp'],
+    keywords: [
+      'khai trương',
+      'hồng phát',
+      'đại cát',
+      'kệ hoa',
+      'lẵng hoa',
+      'vàng',
+      'đỏ',
+      'hướng dương',
+      'lan hồ điệp',
+    ],
     categories: [2, 3],
   },
   {
     id: 'love',
     label: '❤️ Tình yêu & Kỷ niệm',
-    keywords: ['tình yêu', 'yêu', 'kỷ niệm', 'valentine', 'hồng đỏ', 'lãng mạn', 'trái tim', 'nhung', 'pastel'],
+    keywords: [
+      'tình yêu',
+      'yêu',
+      'kỷ niệm',
+      'valentine',
+      'hồng đỏ',
+      'lãng mạn',
+      'trái tim',
+      'nhung',
+      'pastel',
+    ],
     categories: [1, 4],
   },
   {
     id: 'gratitude',
     label: '🌸 Tri ân & Chúc mừng',
-    keywords: ['tri ân', 'chúc mừng', 'cảm ơn', 'giỏ hoa', 'lan', 'hướng dương', 'mẹ', 'thầy', 'cô'],
+    keywords: [
+      'tri ân',
+      'chúc mừng',
+      'cảm ơn',
+      'giỏ hoa',
+      'lan',
+      'hướng dương',
+      'mẹ',
+      'thầy',
+      'cô',
+    ],
     categories: [2, 4],
   },
   {
@@ -59,7 +100,9 @@ const BUDGET_OPTIONS = [
 
 function computeOccasionScore(product, occasionObj) {
   if (!occasionObj || !occasionObj.id) return 1;
-  const text = `${product.tenSanPham || ''} ${product.moTa || ''} ${product.tongMauSac || ''}`.toLowerCase();
+  const text = `${product.tenSanPham || ''} ${product.moTa || ''} ${
+    product.tongMauSac || ''
+  }`.toLowerCase();
   let score = 0;
 
   if (occasionObj.categories.includes(Number(product.maDanhMuc))) {
@@ -79,7 +122,7 @@ export default function ShopPage() {
 
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [keyword, setKeyword] = useState('');
+  const [keyword, setKeyword] = useState(searchParams.get('q') || '');
   const [selectedCategory, setSelectedCategory] = useState(
     searchParams.get('danhMuc') || ''
   );
@@ -119,12 +162,15 @@ export default function ShopPage() {
     };
   }, [loadShopData]);
 
-  // Đồng bộ tham số URL khi người dùng chuyển từ Trang chủ sang
   useEffect(() => {
+    const qParam = searchParams.get('q');
     const dmParam = searchParams.get('danhMuc');
     const goiYParam = searchParams.get('goiY');
     const timKiemParam = searchParams.get('timKiem');
 
+    if (qParam !== null) {
+      setKeyword(qParam);
+    }
     if (dmParam !== null) {
       setSelectedCategory(dmParam);
     }
@@ -167,7 +213,6 @@ export default function ShopPage() {
     return matchKw && matchCat && matchColor && matchBudget;
   });
 
-  // Lọc và xếp hạng thông minh theo Dịp tặng
   const occasionScored = baseMatched.map((p) => ({
     product: p,
     score: computeOccasionScore(p, activeOccasionObj),
@@ -184,6 +229,7 @@ export default function ShopPage() {
     .sort((a, b) => {
       if (sortBy === 'price-asc') return a.product.giaBan - b.product.giaBan;
       if (sortBy === 'price-desc') return b.product.giaBan - a.product.giaBan;
+      if (sortBy === 'newest') return b.product.maSanPham - a.product.maSanPham;
       if (selectedOccasion && b.score !== a.score) return b.score - a.score;
       return a.product.maSanPham - b.product.maSanPham;
     })
@@ -256,11 +302,11 @@ export default function ShopPage() {
       <div style={{ marginBottom: 18 }}>
         <h1 style={{ fontSize: '1.9rem', marginBottom: 4 }}>Bộ Sưu Tập Hoa Tươi</h1>
         <p style={{ color: '#6b7280', fontSize: '0.92rem' }}>
-          Chọn nhanh theo dịp tặng, ngân sách hoặc tông màu để tìm bó hoa ưng ý nhất
+          Tìm kiếm và lọc nhanh theo dịp tặng, ngân sách, tông màu hoặc loại hoa mong muốn
         </p>
       </div>
 
-      {/* Khung Smart AI Gợi ý theo Dịp tặng & Ngân sách */}
+      {/* Khung Smart AI Gợi ý theo Dịp tặng, Ngân sách & Màu sắc */}
       <div ref={aiPanelRef} className="thx-ai-guide-box">
         <div
           style={{
@@ -289,10 +335,10 @@ export default function ShopPage() {
             </span>
             <div>
               <div style={{ fontWeight: 800, fontSize: '0.98rem', color: '#be123c' }}>
-                Smart AI • Gợi Ý Hoa Theo Dịp &amp; Ngân Sách
+                Smart AI • Gợi Ý Hoa Theo Dịp, Ngân Sách &amp; Màu Sắc
               </div>
               <div style={{ fontSize: '0.79rem', color: '#6b7280' }}>
-                Chạm chọn dịp tặng và mức giá bên dưới để lọc ngay các mẫu hoa phù hợp
+                Chạm chọn các tiêu chí bên dưới để AI lọc ngay những mẫu hoa đồng điệu nhất
               </div>
             </div>
           </div>
@@ -310,8 +356,8 @@ export default function ShopPage() {
           )}
         </div>
 
-        {/* Hàng 1: Chọn dịp tặng */}
-        <div style={{ marginBottom: 12 }}>
+        {/* Hàng 1: Dịp tặng */}
+        <div style={{ marginBottom: 11 }}>
           <div
             style={{
               display: 'flex',
@@ -320,7 +366,7 @@ export default function ShopPage() {
               fontSize: '0.8rem',
               fontWeight: 700,
               color: '#374151',
-              marginBottom: 7,
+              marginBottom: 6,
             }}
           >
             <Gift size={14} color="#e11d48" />
@@ -348,8 +394,8 @@ export default function ShopPage() {
           </div>
         </div>
 
-        {/* Hàng 2: Chọn ngân sách */}
-        <div>
+        {/* Hàng 2: Ngân sách */}
+        <div style={{ marginBottom: uniqueColors.length > 0 ? 11 : 0 }}>
           <div
             style={{
               display: 'flex',
@@ -358,7 +404,7 @@ export default function ShopPage() {
               fontSize: '0.8rem',
               fontWeight: 700,
               color: '#374151',
-              marginBottom: 7,
+              marginBottom: 6,
             }}
           >
             <Wallet size={14} color="#e11d48" />
@@ -385,6 +431,58 @@ export default function ShopPage() {
             })}
           </div>
         </div>
+
+        {/* Hàng 3: Tông màu sắc */}
+        {uniqueColors.length > 0 && (
+          <div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                color: '#374151',
+                marginBottom: 6,
+              }}
+            >
+              <Palette size={14} color="#e11d48" />
+              <span>Tông màu chủ đạo:</span>
+            </div>
+            <div className="thx-chip-row">
+              <button
+                type="button"
+                onClick={() => setSelectedColor('')}
+                className="thx-filter-chip"
+                style={{
+                  border: !selectedColor ? '1.5px solid #be123c' : '1px solid #e5e7eb',
+                  background: !selectedColor ? '#ffe4e6' : '#ffffff',
+                  color: !selectedColor ? '#be123c' : '#374151',
+                }}
+              >
+                Tất cả màu
+              </button>
+              {uniqueColors.map((col) => {
+                const active = selectedColor === col;
+                return (
+                  <button
+                    key={col}
+                    type="button"
+                    onClick={() => setSelectedColor(col)}
+                    className="thx-filter-chip"
+                    style={{
+                      border: active ? '1.5px solid #be123c' : '1px solid #e5e7eb',
+                      background: active ? '#ffe4e6' : '#ffffff',
+                      color: active ? '#be123c' : '#374151',
+                    }}
+                  >
+                    {col}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Thanh tìm kiếm & lọc chi tiết */}
@@ -419,13 +517,13 @@ export default function ShopPage() {
         </div>
 
         <div>
-          <label className="form-label">Danh mục</label>
+          <label className="form-label">Loại hoa / Danh mục</label>
           <select
             className="form-control"
             value={selectedCategory}
             onChange={(e) => setSelectedCategory(e.target.value)}
           >
-            <option value="">Tất cả danh mục</option>
+            <option value="">Tất cả loại hoa</option>
             {categories.map((c) => (
               <option key={c.maDanhMuc} value={c.maDanhMuc}>
                 {c.tenDanhMuc}
@@ -451,7 +549,7 @@ export default function ShopPage() {
         </div>
 
         <div>
-          <label className="form-label">Sắp xếp giá</label>
+          <label className="form-label">Sắp xếp theo</label>
           <select
             className="form-control"
             value={sortBy}
@@ -460,6 +558,7 @@ export default function ShopPage() {
             <option value="default">
               {selectedOccasion ? 'Phù hợp nhất với dịp đã chọn' : 'Mặc định'}
             </option>
+            <option value="newest">Sản phẩm mới nhất</option>
             <option value="price-asc">Giá: Thấp đến Cao</option>
             <option value="price-desc">Giá: Cao đến Thấp</option>
           </select>

@@ -30,6 +30,7 @@ export default function CustomerChatWidget() {
   const [hotline, setHotline] = useState(() => getHotlineNumber());
   const [inputText, setInputText] = useState('');
   const [messages, setMessages] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef(null);
 
@@ -46,8 +47,10 @@ export default function CustomerChatWidget() {
     try {
       const conv = ensureCustomerConversation(user);
       setMessages(Array.isArray(conv?.messages) ? conv.messages : []);
+      setUnreadCount(Number(conv?.unreadByCustomer || 0));
     } catch {
       setMessages([]);
+      setUnreadCount(0);
     }
   }, [user, isHidden]);
 
@@ -90,7 +93,7 @@ export default function CustomerChatWidget() {
         loadConversationMessages();
         markConversationReadByCustomer(user);
       });
-    }, 3000);
+    }, 3500);
     return () => clearInterval(timer);
   }, [isOpen, isHidden, loadConversationMessages, user]);
 
@@ -101,6 +104,16 @@ export default function CustomerChatWidget() {
       }, 60);
     }
   }, [isOpen, isHidden, messages.length]);
+
+  const handleToggleChat = () => {
+    const next = !isOpen;
+    setIsOpen(next);
+    if (next) {
+      loadConversationMessages();
+      markConversationReadByCustomer(user);
+      setUnreadCount(0);
+    }
+  };
 
   const handleSendMessage = async (e) => {
     if (e) e.preventDefault();
@@ -131,19 +144,19 @@ export default function CustomerChatWidget() {
       <style>{`
         @keyframes thxSoftPulse {
           0% {
-            box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.45), 0 8px 20px rgba(225, 29, 72, 0.28);
+            box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.42), 0 6px 18px rgba(225, 29, 72, 0.25);
           }
           70% {
-            box-shadow: 0 0 0 11px rgba(225, 29, 72, 0), 0 8px 20px rgba(225, 29, 72, 0.28);
+            box-shadow: 0 0 0 10px rgba(225, 29, 72, 0), 0 6px 18px rgba(225, 29, 72, 0.25);
           }
           100% {
-            box-shadow: 0 0 0 0 rgba(225, 29, 72, 0), 0 8px 20px rgba(225, 29, 72, 0.28);
+            box-shadow: 0 0 0 0 rgba(225, 29, 72, 0), 0 6px 18px rgba(225, 29, 72, 0.25);
           }
         }
         .thx-chat-box {
           position: fixed;
           right: 22px;
-          bottom: 88px;
+          bottom: 136px;
           width: 350px;
           max-width: calc(100vw - 24px);
           background: #ffffff;
@@ -151,9 +164,27 @@ export default function CustomerChatWidget() {
           box-shadow: 0 20px 50px rgba(15, 23, 42, 0.22);
           border: 1px solid #fecdd3;
           overflow: hidden;
-          z-index: 95;
+          z-index: 96;
           display: flex;
           flex-direction: column;
+        }
+        .thx-floating-chat-btn {
+          position: fixed;
+          right: 22px;
+          bottom: 82px;
+          z-index: 91;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 9px 15px;
+          border-radius: 999px;
+          background: #ffffff;
+          color: #be123c;
+          border: 1.5px solid #fecdd3;
+          box-shadow: 0 8px 20px rgba(15, 23, 42, 0.1);
+          font-weight: 700;
+          font-size: 0.85rem;
+          cursor: pointer;
         }
         .thx-hotline-btn {
           position: fixed;
@@ -191,13 +222,24 @@ export default function CustomerChatWidget() {
             right: 12px;
             left: 12px;
             width: auto;
-            bottom: 74px;
+            bottom: 120px;
+          }
+          .thx-floating-chat-btn {
+            right: 14px;
+            bottom: 68px;
+            width: 44px;
+            height: 44px;
+            padding: 0;
+            justify-content: center;
+          }
+          .thx-floating-chat-label {
+            display: none;
           }
           .thx-hotline-btn {
             right: 14px;
             bottom: 16px;
-            width: 48px;
-            height: 48px;
+            width: 44px;
+            height: 44px;
             padding: 0;
             justify-content: center;
             gap: 0;
@@ -260,7 +302,7 @@ export default function CustomerChatWidget() {
 
           <div
             style={{
-              height: 250,
+              height: 245,
               overflowY: 'auto',
               padding: 13,
               background: '#fffafb',
@@ -338,6 +380,41 @@ export default function CustomerChatWidget() {
         </div>
       )}
 
+      {/* Nút mở chat với Admin nhỏ gọn */}
+      <button
+        type="button"
+        onClick={handleToggleChat}
+        aria-label="Nhắn tin với Admin"
+        title="Nhắn tin tư vấn với Admin"
+        className="thx-floating-chat-btn"
+      >
+        <MessageCircle size={19} color="#e11d48" />
+        <span className="thx-floating-chat-label">Nhắn Admin</span>
+        {unreadCount > 0 && (
+          <span
+            style={{
+              position: 'absolute',
+              top: -4,
+              right: -4,
+              background: '#e11d48',
+              color: '#ffffff',
+              fontSize: '0.68rem',
+              fontWeight: 800,
+              minWidth: 18,
+              height: 18,
+              borderRadius: 999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 4px',
+            }}
+          >
+            {unreadCount}
+          </span>
+        )}
+      </button>
+
+      {/* Nút gọi nhanh Hotline */}
       <a
         href={dialHref}
         aria-label={`Gọi ngay Hotline ${displayPhone}`}
@@ -345,7 +422,7 @@ export default function CustomerChatWidget() {
         className="thx-hotline-btn"
       >
         <span className="thx-hotline-icon">
-          <PhoneCall size={18} />
+          <PhoneCall size={17} />
         </span>
         <div className="thx-hotline-text">
           <div
