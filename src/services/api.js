@@ -32,7 +32,7 @@ export function saveHotlineNumber(newPhone) {
     window.dispatchEvent(new Event('thx_hotline_updated'));
     window.dispatchEvent(new Event('storage'));
   } catch {
-    // Bỏ qua
+    // Bỏ qua nếu trình duyệt chặn bộ nhớ cục bộ
   }
   return cleaned;
 }
@@ -185,7 +185,25 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem('thx_token') || sessionStorage.getItem('token');
+  let token = sessionStorage.getItem('thx_token') || sessionStorage.getItem('token');
+
+  // Tự động nhận và chuyển token từ localStorage sang sessionStorage riêng của từng tab
+  if (!token) {
+    const legacyToken = localStorage.getItem('thx_token') || localStorage.getItem('token');
+    if (legacyToken) {
+      token = legacyToken;
+      sessionStorage.setItem('thx_token', legacyToken);
+      localStorage.removeItem('thx_token');
+      localStorage.removeItem('token');
+    }
+    const legacyUser = localStorage.getItem('thx_user') || localStorage.getItem('user');
+    if (legacyUser) {
+      sessionStorage.setItem('thx_user', legacyUser);
+      localStorage.removeItem('thx_user');
+      localStorage.removeItem('user');
+    }
+  }
+
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
