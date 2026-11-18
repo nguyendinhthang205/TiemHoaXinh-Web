@@ -92,40 +92,144 @@ export default function HomePage() {
 
   return (
     <div>
+      <style>{`
+        .thx-hero-section {
+          background: linear-gradient(135deg, #fff1f2 0%, #fffafb 55%, #ffffff 100%);
+          padding: 52px 0 60px;
+          border-bottom: 1px solid #fce7f3;
+        }
+        .thx-hero-grid {
+          display: grid;
+          grid-template-columns: 1.12fr 0.88fr;
+          align-items: center;
+          gap: 40px;
+        }
+        .thx-hero-title {
+          font-size: clamp(1.8rem, 3.8vw, 3.1rem);
+          line-height: 1.2;
+          font-weight: 800;
+          color: #111827;
+          margin-bottom: 16px;
+        }
+        .thx-hero-actions {
+          display: flex;
+          gap: 14px;
+          flex-wrap: wrap;
+          margin-bottom: 32px;
+        }
+        .thx-hero-stats {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 18px;
+          padding-top: 18px;
+          border-top: 1px solid #fce7f3;
+        }
+        .thx-spotlight-img {
+          height: 330px;
+        }
+        .thx-cat-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+          gap: 16px;
+        }
+        .thx-home-products {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+          gap: 20px;
+        }
+        .thx-home-prod-img {
+          height: 220px;
+        }
+
+        @media (max-width: 768px) {
+          .thx-hero-section {
+            padding: 26px 0 36px;
+          }
+          .thx-hero-grid {
+            grid-template-columns: 1fr;
+            gap: 24px;
+          }
+          .thx-hero-title {
+            font-size: 1.72rem;
+            line-height: 1.24;
+            margin-bottom: 12px;
+          }
+          .thx-hero-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 24px;
+          }
+          .thx-hero-actions > a,
+          .thx-hero-actions > button {
+            width: 100%;
+            justify-content: center;
+            padding: 11px 10px !important;
+            font-size: 0.86rem !important;
+            white-space: nowrap;
+          }
+          .thx-hero-stats {
+            gap: 10px;
+            padding-top: 14px;
+          }
+          .thx-hero-stat-num {
+            font-size: 1.12rem !important;
+          }
+          .thx-hero-stat-label {
+            font-size: 0.74rem !important;
+            line-height: 1.3;
+          }
+          .thx-spotlight-img {
+            height: 240px;
+          }
+          .thx-cat-grid {
+            grid-template-columns: 1fr;
+            gap: 10px;
+          }
+          .thx-home-products {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+          }
+          .thx-home-prod-card {
+            padding: 10px !important;
+            border-radius: 16px !important;
+          }
+          .thx-home-prod-img {
+            height: 155px;
+          }
+          .thx-home-prod-footer {
+            flex-direction: column;
+            align-items: stretch !important;
+            gap: 8px;
+          }
+          .thx-home-prod-footer > button,
+          .thx-home-prod-footer > a {
+            width: 100%;
+            justify-content: center;
+          }
+        }
+      `}</style>
+
       {/* Banner chính (Hero Section) */}
-      <section
-        style={{
-          background: 'linear-gradient(135deg, #fff1f2 0%, #fffafb 55%, #ffffff 100%)',
-          padding: '54px 0 64px',
-          borderBottom: '1px solid #fce7f3',
-        }}
-      >
-        <div
-          className="container"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-            alignItems: 'center',
-            gap: 40,
-          }}
-        >
+      <section className="thx-hero-section">
+        <div className="container thx-hero-grid">
           {/* Cột nội dung bên trái */}
           <div>
             <div
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 7,
+                gap: 6,
                 background: '#ffe4e6',
                 color: '#be123c',
-                padding: '6px 14px',
+                padding: '5px 12px',
                 borderRadius: 999,
-                fontSize: '0.8rem',
+                fontSize: '0.76rem',
                 fontWeight: 700,
-                marginBottom: 18,
+                marginBottom: 14,
               }}
             >
-              <Sparkles size={14} />
+              <Sparkles size={13} />
               <span>
                 {isAdmin
                   ? 'Chế Độ Quản Trị Viên • Tiệm Hoa Xinh 2026'
@@ -133,15 +237,7 @@ export default function HomePage() {
               </span>
             </div>
 
-            <h1
-              style={{
-                fontSize: 'clamp(2.1rem, 4vw, 3.15rem)',
-                lineHeight: 1.18,
-                fontWeight: 800,
-                color: '#111827',
-                marginBottom: 18,
-              }}
-            >
+            <h1 className="thx-hero-title">
               Trao Gửi Yêu Thương Qua Từng{' '}
               <span style={{ color: '#e11d48', fontStyle: 'italic' }}>
                 Cánh Hoa Tươi
@@ -150,11 +246,11 @@ export default function HomePage() {
 
             <p
               style={{
-                fontSize: '1rem',
+                fontSize: '0.95rem',
                 color: '#4b5563',
-                lineHeight: 1.65,
+                lineHeight: 1.6,
                 maxWidth: 530,
-                marginBottom: 28,
+                marginBottom: 22,
               }}
             >
               {isAdmin
@@ -162,30 +258,30 @@ export default function HomePage() {
                 : 'Những thiết kế hoa bó, giỏ hoa nghệ thuật được tuyển chọn tỉ mỉ mỗi ngày. Bấm vào bất kỳ mẫu hoa nào để xem hệ thống AI gợi ý các bó hoa đồng điệu nhất.'}
             </p>
 
-            {/* Nút thao tác phân tách rõ ràng giữa Admin và Khách hàng */}
+            {/* 2 Nút thao tác chính cân đối trên cả máy tính & điện thoại */}
             {isAdmin ? (
-              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 36 }}>
+              <div className="thx-hero-actions">
                 <Link
                   to="/admin"
                   className="btn btn-primary"
                   style={{
-                    padding: '12px 24px',
-                    fontSize: '0.96rem',
+                    padding: '12px 22px',
+                    fontSize: '0.94rem',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 8,
                   }}
                 >
-                  <LayoutDashboard size={18} />
-                  <span>Vào Bảng Điều Khiển Quản Trị</span>
+                  <LayoutDashboard size={17} />
+                  <span>Bảng Quản Trị</span>
                 </Link>
 
                 <Link
                   to="/shop"
                   className="btn btn-outline"
                   style={{
-                    padding: '12px 22px',
-                    fontSize: '0.96rem',
+                    padding: '12px 20px',
+                    fontSize: '0.94rem',
                     background: '#ffffff',
                     borderColor: '#fecdd3',
                     color: '#be123c',
@@ -195,25 +291,25 @@ export default function HomePage() {
                     gap: 8,
                   }}
                 >
-                  <span>Xem giao diện Cửa hàng</span>
-                  <ArrowRight size={18} />
+                  <span>Cửa hàng</span>
+                  <ArrowRight size={17} />
                 </Link>
               </div>
             ) : (
-              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 36 }}>
+              <div className="thx-hero-actions">
                 <Link
                   to="/shop"
                   className="btn btn-primary"
                   style={{
-                    padding: '12px 24px',
-                    fontSize: '0.96rem',
+                    padding: '12px 22px',
+                    fontSize: '0.94rem',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 8,
                   }}
                 >
                   <span>Khám phá cửa hàng</span>
-                  <ArrowRight size={18} />
+                  <ArrowRight size={17} />
                 </Link>
 
                 <button
@@ -221,8 +317,8 @@ export default function HomePage() {
                   onClick={handleOpenChat}
                   className="btn btn-outline"
                   style={{
-                    padding: '12px 22px',
-                    fontSize: '0.96rem',
+                    padding: '12px 20px',
+                    fontSize: '0.94rem',
                     background: '#ffffff',
                     borderColor: '#fecdd3',
                     color: '#be123c',
@@ -232,44 +328,54 @@ export default function HomePage() {
                     gap: 8,
                   }}
                 >
-                  <MessageCircle size={18} />
+                  <MessageCircle size={17} />
                   <span>Nhắn với Admin</span>
                 </button>
               </div>
             )}
 
-            {/* 3 Chỉ số nổi bật */}
-            <div
-              style={{
-                display: 'flex',
-                gap: 32,
-                flexWrap: 'wrap',
-                paddingTop: 18,
-                borderTop: '1px solid #fce7f3',
-              }}
-            >
+            {/* 3 Chỉ số nổi bật nằm gọn 1 hàng 3 cột */}
+            <div className="thx-hero-stats">
               <div>
-                <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#111827' }}>
-                  {products.length > 0 ? `${products.length}+` : '20+'}
+                <div
+                  className="thx-hero-stat-num"
+                  style={{ fontSize: '1.35rem', fontWeight: 800, color: '#111827' }}
+                >
+                  {products.length > 0 ? `${products.length}+` : '23+'}
                 </div>
-                <div style={{ fontSize: '0.82rem', color: '#6b7280' }}>
+                <div
+                  className="thx-hero-stat-label"
+                  style={{ fontSize: '0.82rem', color: '#6b7280' }}
+                >
                   Mẫu hoa nghệ thuật
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#111827' }}>
+                <div
+                  className="thx-hero-stat-num"
+                  style={{ fontSize: '1.35rem', fontWeight: 800, color: '#111827' }}
+                >
                   TF-IDF AI
                 </div>
-                <div style={{ fontSize: '0.82rem', color: '#6b7280' }}>
-                  Gợi ý tương đồng thông minh
+                <div
+                  className="thx-hero-stat-label"
+                  style={{ fontSize: '0.82rem', color: '#6b7280' }}
+                >
+                  Gợi ý tương đồng AI
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#111827' }}>
+                <div
+                  className="thx-hero-stat-num"
+                  style={{ fontSize: '1.35rem', fontWeight: 800, color: '#111827' }}
+                >
                   2 Giờ
                 </div>
-                <div style={{ fontSize: '0.82rem', color: '#6b7280' }}>
-                  Giao hoa tươi tận tay
+                <div
+                  className="thx-hero-stat-label"
+                  style={{ fontSize: '0.82rem', color: '#6b7280' }}
+                >
+                  Giao hoa tận tay
                 </div>
               </div>
             </div>
@@ -282,19 +388,19 @@ export default function HomePage() {
               style={{
                 width: '100%',
                 maxWidth: 430,
-                padding: 18,
-                borderRadius: 24,
+                padding: 16,
+                borderRadius: 22,
                 boxShadow: '0 20px 45px rgba(225, 29, 72, 0.1)',
                 background: '#ffffff',
               }}
             >
               <div
+                className="thx-spotlight-img"
                 style={{
-                  borderRadius: 18,
+                  borderRadius: 16,
                   overflow: 'hidden',
-                  height: 330,
                   background: '#fff1f2',
-                  marginBottom: 16,
+                  marginBottom: 14,
                 }}
               >
                 <img
@@ -313,14 +419,23 @@ export default function HomePage() {
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  gap: 12,
+                  gap: 10,
                 }}
               >
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#111827' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      fontSize: '1rem',
+                      color: '#111827',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
                     {spotlightProduct?.tenSanPham || 'Bó Hồng Pastel Công Chúa'}
                   </div>
-                  <div style={{ fontSize: '0.82rem', color: '#6b7280', marginTop: 2 }}>
+                  <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: 2 }}>
                     Thiết kế bán chạy nhất mùa lễ
                   </div>
                 </div>
@@ -332,7 +447,7 @@ export default function HomePage() {
                       : '/shop'
                   }
                   className="btn btn-primary btn-sm"
-                  style={{ whiteSpace: 'nowrap' }}
+                  style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
                 >
                   Xem &amp; Gợi ý AI
                 </Link>
@@ -343,20 +458,20 @@ export default function HomePage() {
       </section>
 
       {/* Danh mục hoa nổi bật */}
-      <section className="container" style={{ marginTop: 48 }}>
+      <section className="container" style={{ marginTop: 40 }}>
         <div
           style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'flex-end',
             flexWrap: 'wrap',
-            gap: 12,
-            marginBottom: 22,
+            gap: 10,
+            marginBottom: 18,
           }}
         >
           <div>
-            <h2 style={{ fontSize: '1.65rem', marginBottom: 4 }}>Danh Mục Hoa Nổi Bật</h2>
-            <p style={{ fontSize: '0.9rem', color: '#6b7280' }}>
+            <h2 style={{ fontSize: '1.5rem', marginBottom: 4 }}>Danh Mục Hoa Nổi Bật</h2>
+            <p style={{ fontSize: '0.88rem', color: '#6b7280' }}>
               Lựa chọn kiểu dáng hoa phù hợp với không gian và thông điệp của bạn
             </p>
           </div>
@@ -365,7 +480,7 @@ export default function HomePage() {
             style={{
               color: '#e11d48',
               fontWeight: 700,
-              fontSize: '0.9rem',
+              fontSize: '0.88rem',
               textDecoration: 'none',
             }}
           >
@@ -373,33 +488,26 @@ export default function HomePage() {
           </Link>
         </div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-            gap: 16,
-          }}
-        >
+        <div className="thx-cat-grid">
           {FEATURED_CATEGORIES.map((cat) => (
             <Link
               key={cat.id}
               to={`/shop?danhMuc=${cat.id}`}
               className="panel"
               style={{
-                padding: 18,
+                padding: 16,
                 textDecoration: 'none',
                 color: 'inherit',
                 display: 'flex',
                 alignItems: 'flex-start',
                 gap: 12,
-                transition: 'transform 0.2s ease',
               }}
             >
               <div
                 style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 12,
+                  width: 36,
+                  height: 36,
+                  borderRadius: 11,
                   background: '#fff1f2',
                   color: '#e11d48',
                   display: 'flex',
@@ -408,13 +516,13 @@ export default function HomePage() {
                   flexShrink: 0,
                 }}
               >
-                <Heart size={18} />
+                <Heart size={17} />
               </div>
               <div>
-                <div style={{ fontWeight: 700, fontSize: '0.96rem', marginBottom: 4 }}>
+                <div style={{ fontWeight: 700, fontSize: '0.94rem', marginBottom: 3 }}>
                   {cat.name}
                 </div>
-                <div style={{ fontSize: '0.8rem', color: '#6b7280', lineHeight: 1.45 }}>
+                <div style={{ fontSize: '0.79rem', color: '#6b7280', lineHeight: 1.45 }}>
                   {cat.desc}
                 </div>
               </div>
@@ -424,20 +532,20 @@ export default function HomePage() {
       </section>
 
       {/* Bộ sưu tập hoa tươi tiêu biểu */}
-      <section className="container" style={{ marginTop: 48, marginBottom: 60 }}>
+      <section className="container" style={{ marginTop: 42, marginBottom: 76 }}>
         <div
           style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'flex-end',
             flexWrap: 'wrap',
-            gap: 12,
-            marginBottom: 22,
+            gap: 10,
+            marginBottom: 18,
           }}
         >
           <div>
-            <h2 style={{ fontSize: '1.65rem', marginBottom: 4 }}>Mẫu Hoa Tươi Tuyển Chọn</h2>
-            <p style={{ fontSize: '0.9rem', color: '#6b7280' }}>
+            <h2 style={{ fontSize: '1.5rem', marginBottom: 4 }}>Mẫu Hoa Tươi Tuyển Chọn</h2>
+            <p style={{ fontSize: '0.88rem', color: '#6b7280' }}>
               Cập nhật mẫu mới mỗi ngày &bull; Bấm xem chi tiết để nhận gợi ý phối hoa bằng AI
             </p>
           </div>
@@ -451,17 +559,11 @@ export default function HomePage() {
             Đang tải danh sách mẫu hoa...
           </div>
         ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
-              gap: 20,
-            }}
-          >
+          <div className="thx-home-products">
             {products.slice(0, 8).map((sp) => (
               <div
                 key={sp.maSanPham}
-                className="panel"
+                className="panel thx-home-prod-card"
                 style={{
                   padding: 14,
                   borderRadius: 20,
@@ -473,28 +575,28 @@ export default function HomePage() {
                 <div>
                   <Link
                     to={`/product/${sp.maSanPham}`}
-                    style={{ display: 'block', position: 'relative', marginBottom: 12 }}
+                    style={{ display: 'block', position: 'relative', marginBottom: 10 }}
                   >
                     <img
                       src={getFlowerImage(sp)}
                       alt={sp.tenSanPham}
+                      className="thx-home-prod-img"
                       style={{
                         width: '100%',
-                        height: 220,
                         objectFit: 'cover',
-                        borderRadius: 14,
+                        borderRadius: 13,
                       }}
                     />
                     <span
                       style={{
                         position: 'absolute',
-                        top: 10,
-                        left: 10,
+                        top: 8,
+                        left: 8,
                         background: 'rgba(255, 255, 255, 0.92)',
                         color: '#be123c',
-                        padding: '3px 10px',
+                        padding: '2px 9px',
                         borderRadius: 999,
-                        fontSize: '0.75rem',
+                        fontSize: '0.72rem',
                         fontWeight: 700,
                       }}
                     >
@@ -508,19 +610,20 @@ export default function HomePage() {
                       textDecoration: 'none',
                       color: '#111827',
                       fontWeight: 700,
-                      fontSize: '1.02rem',
+                      fontSize: '0.96rem',
                       display: 'block',
                       marginBottom: 4,
                     }}
                   >
                     {sp.tenSanPham}
                   </Link>
-                  <div style={{ fontSize: '0.8rem', color: '#6b7280', marginBottom: 12 }}>
+                  <div style={{ fontSize: '0.78rem', color: '#6b7280', marginBottom: 10 }}>
                     Còn lại: {sp.soLuongTon ?? 20} bó
                   </div>
                 </div>
 
                 <div
+                  className="thx-home-prod-footer"
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
@@ -529,7 +632,7 @@ export default function HomePage() {
                     borderTop: '1px solid #f3f4f6',
                   }}
                 >
-                  <span style={{ fontWeight: 800, color: '#e11d48', fontSize: '1.05rem' }}>
+                  <span style={{ fontWeight: 800, color: '#e11d48', fontSize: '0.98rem' }}>
                     {formatVND(sp.giaBan)}
                   </span>
 
