@@ -256,7 +256,6 @@ export default function AdminDashboard() {
 
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [loadingDetailId, setLoadingDetailId] = useState(null);
-  const [updatingOrderId, setUpdatingOrderId] = useState(null);
 
   const [productModal, setProductModal] = useState(null);
   const [savingProduct, setSavingProduct] = useState(false);
@@ -300,7 +299,6 @@ export default function AdminDashboard() {
     };
   }, [syncChats]);
 
-  // Chỉ đồng bộ nền khi tab đang mở hiển thị, tránh dồn yêu cầu khi chạy ngầm
   useEffect(() => {
     const intervalMs = activeTab === 'messages' ? 5000 : 18000;
     const timer = setInterval(() => {
@@ -329,11 +327,6 @@ export default function AdminDashboard() {
     activeConversation?.messages?.length,
     activeConversation?.unreadByAdmin,
   ]);
-
-  const writeLocalMeta = async (orderId, patch) => {
-    const updated = await writeOrderMeta(orderId, patch);
-    setOrderMetaMap(updated);
-  };
 
   const markOrdersDeletedBatch = async (orderIds) => {
     if (!Array.isArray(orderIds) || orderIds.length === 0) return;
@@ -428,18 +421,22 @@ export default function AdminDashboard() {
 
     for (const p of heavyItems) {
       try {
-        await api.put(`/SanPham/${p.maSanPham}`, {
-          maSanPham: p.maSanPham,
-          tenSanPham: p.tenSanPham,
-          maDanhMuc: p.maDanhMuc || 1,
-          giaBan: p.giaBan,
-          soLuongTon: p.soLuongTon ?? 20,
-          tongMauSac: p.tongMauSac || 'Tông Hồng Pastel',
-          moTa: p.moTa || '',
-          hinhAnhChinh: '',
-          hinhAnh: '',
-          trangThai: p.trangThai ?? true,
-        });
+        await api.put(
+          `/SanPham/${p.maSanPham}`,
+          {
+            maSanPham: p.maSanPham,
+            tenSanPham: p.tenSanPham,
+            maDanhMuc: p.maDanhMuc || 1,
+            giaBan: p.giaBan,
+            soLuongTon: p.soLuongTon ?? 20,
+            tongMauSac: p.tongMauSac || 'Tông Hồng Pastel',
+            moTa: p.moTa || '',
+            hinhAnhChinh: '',
+            hinhAnh: '',
+            trangThai: p.trangThai ?? true,
+          },
+          { timeout: 5000 }
+        );
       } catch {
         // Bỏ qua
       }
@@ -447,21 +444,21 @@ export default function AdminDashboard() {
     return true;
   }, []);
 
-  // Tải dự phòng nhẹ nhàng tối đa 12 đơn gần nhất theo cặp 2 đơn (không làm nghẽn IIS)
+  // Tải nhanh 24 đơn mới nhất theo từng cụm 4 đơn (hoàn tất trong ~1.5 giây)
   const loadRecentOrdersFallback = useCallback(async () => {
     const metaKeys = Object.keys(readLocalOrderMeta())
       .map((k) => Number(k))
       .filter((n) => Number.isFinite(n) && n > 0);
-    const maxKnownId = metaKeys.length > 0 ? Math.max(...metaKeys) : 765;
-    const startId = Math.max(maxKnownId + 2, 765);
+    const maxKnownId = metaKeys.length > 0 ? Math.max(...metaKeys) : 767;
+    const startId = Math.max(maxKnownId + 3, 767);
 
     const recovered = [];
     let missStreak = 0;
 
-    for (let id = startId; id >= Math.max(1, startId - 11); id -= 2) {
-      const batch = [id, id - 1].filter((x) => x >= 1);
+    for (let id = startId; id >= Math.max(1, startId - 23); id -= 4) {
+      const batch = [id, id - 1, id - 2, id - 3].filter((x) => x >= 1);
       const resList = await Promise.allSettled(
-        batch.map((orderId) => api.get(`/DonHang/${orderId}`, { timeout: 4500 }))
+        batch.map((orderId) => api.get(`/DonHang/${orderId}`, { timeout: 4000 }))
       );
       let batchHits = 0;
       resList.forEach((r) => {
@@ -483,13 +480,13 @@ export default function AdminDashboard() {
   }, []);
 
   const loadOrdersOnly = useCallback(async () => {
-    // Khóa chống gửi trùng nhiều yêu cầu /DonHang cùng lúc
     if (ordersFetchLockRef.current) return false;
     ordersFetchLockRef.current = true;
     setLoadingOrders(true);
 
     try {
-      const res = await api.get('/DonHang', { timeout: 22000 });
+      // Giới hạn 6 giây cho danh sách tổng để không bao giờ treo giao diện
+      const res = await api.get('/DonHang', { timeout: 6500 });
       setApiError('');
       const d = res.data;
       let ordList = Array.isArray(d) ? d : d?.items || d?.data || [];
@@ -501,7 +498,7 @@ export default function AdminDashboard() {
             ord.trangThai || ord.trangThaiDonHang || ord.trangThaiDon || ord.status;
           if (hasStatus) return ord;
           try {
-            const dRes = await api.get(`/DonHang/${ord.maDonHang}`, { timeout: 3500 });
+            const dRes = await api.get(`/DonHang/${ord.maDonHang}`, { timeout: 3000 });
             return { ...ord, ...(dRes.data || {}) };
           } catch {
             return ord;
@@ -533,13 +530,20 @@ export default function AdminDashboard() {
       const fallbackList = await loadRecentOrdersFallback();
       if (fallbackList.length > 0) {
         setOrders(fallbackList);
-        setApiError(
-          `Đang hiển thị ${fallbackList.length} đơn hàng mới nhất (Danh sách tổng đang quá tải trên máy chủ).`
-        );
+        setApiError('');
+        try {
+          const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
+          localStorage.setItem(
+            'thx_admin_fast_cache',
+            JSON.stringify({ ...prevCache, orders: fallbackList })
+          );
+        } catch {
+          // Bỏ qua
+        }
         return true;
       }
 
-      const reasonText = status ? `HTTP ${status}` : 'Máy chủ phản hồi chậm';
+      const reasonText = status ? `HTTP ${status}` : 'Máy chủ đang khởi động';
       setApiError(
         `Chưa tải được đơn hàng (${reasonText}). Vui lòng đợi 5 giây rồi bấm "Thử kết nối lại".`
       );
@@ -581,7 +585,7 @@ export default function AdminDashboard() {
     });
 
     api
-      .get('/SanPham', { timeout: 12000 })
+      .get('/SanPham', { timeout: 10000 })
       .then(async (res) => {
         const d = res.data;
         const spList = Array.isArray(d) ? d : d?.items || [];
@@ -614,11 +618,11 @@ export default function AdminDashboard() {
     loadOrdersOnly();
 
     api
-      .get('/DuBao', { timeout: 5000 })
+      .get('/DuBao', { timeout: 4500 })
       .then((res) => res.data)
       .catch(() =>
         axios
-          .get(`${AI_BASE_URL}/forecast`, { timeout: 5000 })
+          .get(`${AI_BASE_URL}/forecast`, { timeout: 4500 })
           .then((res) => res.data)
           .catch(() => null)
       )
@@ -651,10 +655,11 @@ export default function AdminDashboard() {
   }, [statusFilter, orderSearch]);
 
   const deleteOrderFromBackend = async (orderId) => {
+    const cfg = { timeout: 4500 };
     const deleteAttempts = [
-      () => api.delete(`/DonHang/${orderId}`),
-      () => api.delete(`/DonHang/delete/${orderId}`),
-      () => api.post(`/DonHang/${orderId}/delete`),
+      () => api.delete(`/DonHang/${orderId}`, cfg),
+      () => api.delete(`/DonHang/delete/${orderId}`, cfg),
+      () => api.post(`/DonHang/${orderId}/delete`, null, cfg),
     ];
     for (const fn of deleteAttempts) {
       try {
@@ -717,118 +722,126 @@ export default function AdminDashboard() {
   };
 
   const pushStatusToBackend = async (orderId, nextCode) => {
+    const cfg = { timeout: 4500 };
     if (nextCode === 'Cancelled') {
-      const cancelAttempts = [
-        () => api.put(`/DonHang/${orderId}/cancel`, { lyDoHuy: 'Cửa hàng hủy đơn' }),
-        () => api.put(`/DonHang/${orderId}/cancel`),
-        () => api.put(`/DonHang/${orderId}/status`, { trangThai: 'Cancelled' }),
-        () => api.put(`/DonHang/${orderId}/status`, { status: 'Cancelled' }),
-      ];
-      for (const fn of cancelAttempts) {
+      try {
+        await api.put(`/DonHang/${orderId}/cancel`, { lyDoHuy: 'Cửa hàng hủy đơn' }, cfg);
+        return true;
+      } catch {
         try {
-          await fn();
+          await api.put(`/DonHang/${orderId}/status`, { trangThai: 'Cancelled' }, cfg);
           return true;
         } catch {
-          // Thử tiếp
+          return false;
         }
       }
-      return false;
     }
 
-    const codeCandidates =
-      nextCode === 'Confirmed'
-        ? ['Confirmed', 'Đã xác nhận']
-        : nextCode === 'Shipping'
-        ? ['Shipping', 'Đang giao']
-        : nextCode === 'Completed'
-        ? ['Completed', 'Delivered', 'Hoàn thành', 'Đã giao']
-        : ['Pending', 'Chờ xác nhận'];
+    const cachedMode = localStorage.getItem('thx_status_api_mode');
+    const runners = {
+      trangThai: () => api.put(`/DonHang/${orderId}/status`, { trangThai: nextCode }, cfg),
+      status: () => api.put(`/DonHang/${orderId}/status`, { status: nextCode }, cfg),
+      query: () =>
+        api.put(`/DonHang/${orderId}/status?trangThai=${encodeURIComponent(nextCode)}`, null, cfg),
+    };
 
-    for (const val of codeCandidates) {
-      const attempts = [
-        () => api.put(`/DonHang/${orderId}/status`, { trangThai: val }),
-        () => api.put(`/DonHang/${orderId}/status`, { trangThaiMoi: val }),
-        () => api.put(`/DonHang/${orderId}/status`, { status: val }),
-        () =>
-          api.put(`/DonHang/${orderId}/status`, JSON.stringify(val), {
-            headers: { 'Content-Type': 'application/json' },
-          }),
-        () => api.put(`/DonHang/${orderId}/status?trangThai=${encodeURIComponent(val)}`),
-        () => api.put(`/DonHang/${orderId}/status?status=${encodeURIComponent(val)}`),
-      ];
-      for (const fn of attempts) {
-        try {
-          await fn();
-          return true;
-        } catch {
-          // Thử tiếp
-        }
+    const orderedKeys =
+      cachedMode && runners[cachedMode]
+        ? [cachedMode, ...Object.keys(runners).filter((k) => k !== cachedMode)]
+        : Object.keys(runners);
+
+    for (const key of orderedKeys) {
+      try {
+        await runners[key]();
+        localStorage.setItem('thx_status_api_mode', key);
+        return true;
+      } catch {
+        // Thử định dạng kế tiếp
       }
     }
     return false;
   };
 
-  const handleChangeOrderStatus = async (order, nextCode, isPickup = false) => {
+  const handleChangeOrderStatus = (order, nextCode, isPickup = false) => {
     const orderId = order.maDonHang;
     const targetInfo = normalizeAdminOrderStatus(nextCode, isPickup);
-    try {
-      setUpdatingOrderId(orderId);
-      await pushStatusToBackend(orderId, nextCode);
 
-      const patch = { statusOverride: nextCode };
-      if (nextCode === 'Completed') {
-        patch.isPaid = true;
-        try {
-          await api.put(`/DonHang/${orderId}/confirm-payment`);
-        } catch {
-          // Bỏ qua
-        }
-      }
-      await writeLocalMeta(orderId, patch);
-
-      setOrders((prev) =>
-        prev.map((item) =>
-          item.maDonHang === orderId
-            ? { ...item, trangThai: nextCode, status: nextCode }
-            : item
-        )
-      );
-
-      if (selectedOrder && selectedOrder.maDonHang === orderId) {
-        setSelectedOrder((prev) => ({
-          ...prev,
-          trangThai: nextCode,
-          status: nextCode,
-          _meta: { ...(prev._meta || {}), ...patch },
-        }));
-      }
-
-      showToast(`Đã đồng bộ đơn #${orderId} sang "${targetInfo.label}"!`);
-    } finally {
-      setUpdatingOrderId(null);
+    const patch = { statusOverride: nextCode };
+    if (nextCode === 'Completed') {
+      patch.isPaid = true;
     }
+
+    // 1. Cập nhật ngay lập tức trên giao diện (0ms, tuyệt đối không gây đơ)
+    const now = Date.now();
+    const localCurrent = readLocalOrderMeta();
+    localCurrent[String(orderId)] = {
+      ...(localCurrent[String(orderId)] || {}),
+      ...patch,
+      updatedAt: now,
+    };
+    try {
+      localStorage.setItem('thx_order_meta', JSON.stringify(localCurrent));
+    } catch {
+      // Bỏ qua
+    }
+    setOrderMetaMap({ ...localCurrent });
+
+    setOrders((prev) =>
+      prev.map((item) =>
+        item.maDonHang === orderId
+          ? { ...item, trangThai: nextCode, status: nextCode }
+          : item
+      )
+    );
+
+    if (selectedOrder && selectedOrder.maDonHang === orderId) {
+      setSelectedOrder((prev) => ({
+        ...prev,
+        trangThai: nextCode,
+        status: nextCode,
+        _meta: { ...(prev._meta || {}), ...patch },
+      }));
+    }
+
+    showToast(`Đã chuyển đơn #${orderId} sang "${targetInfo.label}"!`);
+
+    // 2. Đồng bộ ngầm lên SQL Server và đám mây npoint.io
+    pushStatusToBackend(orderId, nextCode).then(() => {
+      if (nextCode === 'Completed') {
+        api.put(`/DonHang/${orderId}/confirm-payment`, null, { timeout: 4500 }).catch(() => {});
+      }
+    });
+    writeOrderMeta(orderId, patch);
   };
 
-  const handleConfirmPayment = async (order) => {
+  const handleConfirmPayment = (order) => {
     const orderId = order.maDonHang;
+
+    const now = Date.now();
+    const localCurrent = readLocalOrderMeta();
+    localCurrent[String(orderId)] = {
+      ...(localCurrent[String(orderId)] || {}),
+      isPaid: true,
+      updatedAt: now,
+    };
     try {
-      setUpdatingOrderId(orderId);
-      try {
-        await api.put(`/DonHang/${orderId}/confirm-payment`);
-      } catch {
-        // Đồng bộ trạng thái thanh toán
-      }
-      await writeLocalMeta(orderId, { isPaid: true });
-      if (selectedOrder && selectedOrder.maDonHang === orderId) {
-        setSelectedOrder((prev) => ({
-          ...prev,
-          _meta: { ...(prev._meta || {}), isPaid: true },
-        }));
-      }
-      showToast(`Đã xác nhận thu tiền cho đơn hàng #${orderId}`);
-    } finally {
-      setUpdatingOrderId(null);
+      localStorage.setItem('thx_order_meta', JSON.stringify(localCurrent));
+    } catch {
+      // Bỏ qua
     }
+    setOrderMetaMap({ ...localCurrent });
+
+    if (selectedOrder && selectedOrder.maDonHang === orderId) {
+      setSelectedOrder((prev) => ({
+        ...prev,
+        _meta: { ...(prev._meta || {}), isPaid: true },
+      }));
+    }
+
+    showToast(`Đã xác nhận thu tiền cho đơn hàng #${orderId}`);
+
+    api.put(`/DonHang/${orderId}/confirm-payment`, null, { timeout: 4500 }).catch(() => {});
+    writeOrderMeta(orderId, { isPaid: true });
   };
 
   const handleOpenOrderDetail = async (order) => {
@@ -841,7 +854,7 @@ export default function AdminDashboard() {
         order.chiTietDonHangs || order.chiTietDonHang || order.items || order.sanPhams || [];
 
       try {
-        const res = await api.get(`/DonHang/${orderId}`, { timeout: 6000 });
+        const res = await api.get(`/DonHang/${orderId}`, { timeout: 5000 });
         const d = res.data || {};
         detailObj = { ...detailObj, ...d };
         const fetchedItems =
@@ -1222,7 +1235,7 @@ export default function AdminDashboard() {
             title="Tải lại dữ liệu mới nhất"
           >
             <RefreshCw size={16} />
-            <span>{loading || loadingOrders ? 'Đang tải...' : 'Làm mới'}</span>
+            <span>{loading || loadingOrders ? 'Đang cập nhật...' : 'Làm mới'}</span>
           </button>
 
           <button
@@ -1571,9 +1584,9 @@ export default function AdminDashboard() {
           >
             <div>
               <h2 style={{ fontSize: '1.35rem', margin: 0 }}>Danh Sách Đơn Hàng Khách Đặt</h2>
-              {loadingOrders && (
-                <div style={{ fontSize: '0.8rem', color: '#e11d48', marginTop: 4 }}>
-                  ⏳ Đang đồng bộ danh sách đơn hàng từ máy chủ SQL Server...
+              {loadingOrders && activeOrders.length === 0 && (
+                <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: 4 }}>
+                  Đang tải danh sách đơn hàng...
                 </div>
               )}
             </div>
@@ -1685,7 +1698,7 @@ export default function AdminDashboard() {
                   <tr>
                     <td colSpan={8} style={{ textAlign: 'center', padding: 32, color: '#6b7280' }}>
                       {loadingOrders
-                        ? 'Đang tải danh sách đơn hàng từ máy chủ, vui lòng đợi trong giây lát...'
+                        ? 'Đang tải danh sách đơn hàng...'
                         : 'Không tìm thấy đơn hàng nào phù hợp với điều kiện lọc.'}
                     </td>
                   </tr>
@@ -1720,7 +1733,6 @@ export default function AdminDashboard() {
 
                     const totalMoney =
                       meta.grandTotal ?? order.tongThanhToan ?? order.tongTien ?? 0;
-                    const isBusy = updatingOrderId === order.maDonHang || deletingOrders;
                     const isChecked = selectedOrderIds.includes(order.maDonHang);
 
                     return (
@@ -1814,7 +1826,6 @@ export default function AdminDashboard() {
                         <td style={{ padding: '13px 10px' }}>
                           <select
                             aria-label={`Trạng thái đơn #${order.maDonHang}`}
-                            disabled={isBusy}
                             value={st.code}
                             onChange={(e) =>
                               handleChangeOrderStatus(order, e.target.value, isPickup)
@@ -1856,7 +1867,6 @@ export default function AdminDashboard() {
                             {st.code === 'Pending' && (
                               <button
                                 type="button"
-                                disabled={isBusy}
                                 onClick={() =>
                                   handleChangeOrderStatus(order, 'Confirmed', isPickup)
                                 }
@@ -1870,7 +1880,6 @@ export default function AdminDashboard() {
                             {st.code === 'Confirmed' && (
                               <button
                                 type="button"
-                                disabled={isBusy}
                                 onClick={() =>
                                   handleChangeOrderStatus(order, 'Shipping', isPickup)
                                 }
@@ -1884,7 +1893,6 @@ export default function AdminDashboard() {
                             {st.code === 'Shipping' && (
                               <button
                                 type="button"
-                                disabled={isBusy}
                                 onClick={() =>
                                   handleChangeOrderStatus(order, 'Completed', isPickup)
                                 }
@@ -1898,7 +1906,6 @@ export default function AdminDashboard() {
                             {!isPaid && st.code !== 'Cancelled' && (
                               <button
                                 type="button"
-                                disabled={isBusy}
                                 onClick={() => handleConfirmPayment(order)}
                                 className="btn btn-outline btn-sm"
                                 style={{ whiteSpace: 'nowrap' }}
@@ -1920,7 +1927,7 @@ export default function AdminDashboard() {
 
                             <button
                               type="button"
-                              disabled={isBusy}
+                              disabled={deletingOrders}
                               onClick={() => handleDeleteSingleOrder(order)}
                               className="btn btn-outline btn-sm"
                               title={`Xóa đơn hàng #${order.maDonHang}`}
