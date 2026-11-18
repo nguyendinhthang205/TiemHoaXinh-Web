@@ -16,7 +16,11 @@ const PRODUCT_SYNC_KEY = 'thx_product_overrides';
 const HOTLINE_STORAGE_KEY = 'thx_hotline_number';
 export const DEFAULT_HOTLINE = '0905 123 456';
 
-async function fetchCloudWithTimeout(options = {}, timeoutMs = 6000) {
+let inFlightCloudGet = null;
+let lastCloudPayload = null;
+let lastCloudFetchedAt = 0;
+
+async function fetchCloudWithTimeout(options = {}, timeoutMs = 5500) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -29,9 +33,38 @@ async function fetchCloudWithTimeout(options = {}, timeoutMs = 6000) {
   }
 }
 
-// Tự động cắt gọn các ảnh base64 cũ nếu gói JSON trên npoint.io vượt 75KB để tránh lỗi nghẽn 413
+// Gộp các yêu cầu đọc npoint.io trong vòng 3 giây thành 1 luồng duy nhất để tránh nghẹt băng thông
+async function getSharedCloudBin(forceFresh = false) {
+  const now = Date.now();
+  if (!forceFresh && lastCloudPayload && now - lastCloudFetchedAt < 3000) {
+    return lastCloudPayload;
+  }
+  if (inFlightCloudGet) {
+    return inFlightCloudGet;
+  }
+
+  inFlightCloudGet = (async () => {
+    try {
+      const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5500);
+      if (!res.ok) return lastCloudPayload;
+      const raw = await res.json();
+      const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+      lastCloudPayload = safeBin;
+      lastCloudFetchedAt = Date.now();
+      return safeBin;
+    } catch {
+      return lastCloudPayload;
+    } finally {
+      inFlightCloudGet = null;
+    }
+  })();
+
+  return inFlightCloudGet;
+}
+
 function compactCloudBin(rawBin) {
-  const safeBin = rawBin && typeof rawBin === 'object' && !Array.isArray(rawBin) ? { ...rawBin } : {};
+  const safeBin =
+    rawBin && typeof rawBin === 'object' && !Array.isArray(rawBin) ? { ...rawBin } : {};
   const overrides = safeBin.__product_overrides__;
   if (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) {
     const entries = Object.entries(overrides).sort(
@@ -40,7 +73,7 @@ function compactCloudBin(rawBin) {
     const kept = {};
     for (const [k, val] of entries) {
       kept[k] = val;
-      if (JSON.stringify(safeBin).length > 75000) {
+      if (JSON.stringify(safeBin).length > 72000) {
         if (kept[k]?.hinhAnhChinh?.startsWith('data:image/')) {
           delete kept[k].hinhAnhChinh;
         }
@@ -53,6 +86,8 @@ function compactCloudBin(rawBin) {
 
 async function pushCompactCloudBin(rawBin) {
   const compacted = compactCloudBin(rawBin);
+  lastCloudPayload = compacted;
+  lastCloudFetchedAt = Date.now();
   return fetchCloudWithTimeout(
     {
       method: 'POST',
@@ -74,9 +109,8 @@ export function getHotlineNumber() {
 
 export async function syncHotlineFromCloud() {
   try {
-    const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5000);
-    if (!res.ok) return getHotlineNumber();
-    const raw = await res.json();
+    const raw = await getSharedCloudBin(false);
+    if (!raw) return getHotlineNumber();
     const remoteHotline = typeof raw?.__hotline__ === 'string' ? raw.__hotline__.trim() : '';
     if (remoteHotline && remoteHotline !== getHotlineNumber()) {
       localStorage.setItem(HOTLINE_STORAGE_KEY, remoteHotline);
@@ -99,10 +133,9 @@ export function saveHotlineNumber(newPhone) {
     // Bỏ qua
   }
 
-  fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5000)
-    .then((res) => (res.ok ? res.json() : {}))
+  getSharedCloudBin(true)
     .then((raw) => {
-      const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+      const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
       safeBin.__hotline__ = cleaned;
       return pushCompactCloudBin(safeBin);
     })
@@ -124,11 +157,10 @@ export function readLocalOrderMeta() {
 export async function syncOrderMetaFromCloud() {
   const localMeta = readLocalOrderMeta();
   try {
-    const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5000);
-    if (!res.ok) return localMeta;
-    const raw = await res.json();
-    const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-    const isOversized = JSON.stringify(safeBin).length > 78000;
+    const raw = await getSharedCloudBin(false);
+    if (!raw) return localMeta;
+    const safeBin = { ...raw };
+    const isOversized = JSON.stringify(safeBin).length > 75000;
     const remoteMeta =
       safeBin.__order_meta__ &&
       typeof safeBin.__order_meta__ === 'object' &&
@@ -203,9 +235,8 @@ export async function writeOrderMeta(orderId, patch) {
   }
 
   try {
-    const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5000);
-    const raw = res.ok ? await res.json() : {};
-    const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const raw = await getSharedCloudBin(true);
+    const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
     const remoteMeta =
       safeBin.__order_meta__ && typeof safeBin.__order_meta__ === 'object'
         ? safeBin.__order_meta__
@@ -238,10 +269,9 @@ export function getProductOverrides() {
 export async function syncProductOverridesFromCloud() {
   const localOverrides = getProductOverrides();
   try {
-    const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5000);
-    if (!res.ok) return localOverrides;
-    const raw = await res.json();
-    const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const raw = await getSharedCloudBin(false);
+    if (!raw) return localOverrides;
+    const safeBin = { ...raw };
     const remoteOverrides =
       safeBin.__product_overrides__ &&
       typeof safeBin.__product_overrides__ === 'object' &&
@@ -316,9 +346,8 @@ export async function saveProductOverride(key, patch) {
   }
 
   try {
-    const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5000);
-    const raw = res.ok ? await res.json() : {};
-    const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const raw = await getSharedCloudBin(true);
+    const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
     const remoteOverrides =
       safeBin.__product_overrides__ && typeof safeBin.__product_overrides__ === 'object'
         ? safeBin.__product_overrides__

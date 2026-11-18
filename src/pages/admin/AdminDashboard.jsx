@@ -245,6 +245,7 @@ export default function AdminDashboard() {
   const [adminReplyText, setAdminReplyText] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
   const adminChatEndRef = useRef(null);
+  const ordersFetchLockRef = useRef(false);
 
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [orderSearch, setOrderSearch] = useState('');
@@ -299,9 +300,11 @@ export default function AdminDashboard() {
     };
   }, [syncChats]);
 
+  // Chỉ đồng bộ nền khi tab đang mở hiển thị, tránh dồn yêu cầu khi chạy ngầm
   useEffect(() => {
-    const intervalMs = activeTab === 'messages' ? 4000 : 12000;
+    const intervalMs = activeTab === 'messages' ? 5000 : 18000;
     const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       syncChatsFromCloud().then(() => syncChats());
       syncOrderMetaFromCloud().then((latest) => setOrderMetaMap(latest));
     }, intervalMs);
@@ -407,7 +410,6 @@ export default function AdminDashboard() {
     });
   }, []);
 
-  // Dọn chuỗi ảnh base64 nặng ra khỏi SQL Server để API /DonHang không bị quá tải
   const stripHeavyBase64FromSql = useCallback(async (spList) => {
     const heavyItems = spList.filter((p) => {
       const img1 = String(p.hinhAnhChinh || '');
@@ -445,25 +447,35 @@ export default function AdminDashboard() {
     return true;
   }, []);
 
-  // Tải dự phòng 20 đơn gần nhất theo từng nhóm nhỏ 4 đơn (không gây nghẽn MonsterASP)
+  // Tải dự phòng nhẹ nhàng tối đa 12 đơn gần nhất theo cặp 2 đơn (không làm nghẽn IIS)
   const loadRecentOrdersFallback = useCallback(async () => {
     const metaKeys = Object.keys(readLocalOrderMeta())
       .map((k) => Number(k))
       .filter((n) => Number.isFinite(n) && n > 0);
     const maxKnownId = metaKeys.length > 0 ? Math.max(...metaKeys) : 765;
-    const startId = Math.max(maxKnownId + 3, 765);
+    const startId = Math.max(maxKnownId + 2, 765);
 
     const recovered = [];
-    for (let id = startId; id >= Math.max(1, startId - 19); id -= 4) {
-      const batch = [id, id - 1, id - 2, id - 3].filter((x) => x >= 1);
+    let missStreak = 0;
+
+    for (let id = startId; id >= Math.max(1, startId - 11); id -= 2) {
+      const batch = [id, id - 1].filter((x) => x >= 1);
       const resList = await Promise.allSettled(
-        batch.map((orderId) => api.get(`/DonHang/${orderId}`, { timeout: 6000 }))
+        batch.map((orderId) => api.get(`/DonHang/${orderId}`, { timeout: 4500 }))
       );
+      let batchHits = 0;
       resList.forEach((r) => {
         if (r.status === 'fulfilled' && r.value?.data?.maDonHang) {
           recovered.push(r.value.data);
+          batchHits += 1;
         }
       });
+      if (batchHits === 0) {
+        missStreak += 1;
+        if (missStreak >= 2) break;
+      } else {
+        missStreak = 0;
+      }
     }
 
     recovered.sort((a, b) => (b.maDonHang || 0) - (a.maDonHang || 0));
@@ -471,35 +483,39 @@ export default function AdminDashboard() {
   }, []);
 
   const loadOrdersOnly = useCallback(async () => {
+    // Khóa chống gửi trùng nhiều yêu cầu /DonHang cùng lúc
+    if (ordersFetchLockRef.current) return false;
+    ordersFetchLockRef.current = true;
     setLoadingOrders(true);
+
     try {
-      const res = await api.get('/DonHang', { timeout: 30000 });
+      const res = await api.get('/DonHang', { timeout: 22000 });
       setApiError('');
       const d = res.data;
       let ordList = Array.isArray(d) ? d : d?.items || d?.data || [];
       ordList.sort((a, b) => (b.maDonHang || 0) - (a.maDonHang || 0));
 
       const topEnriched = await Promise.all(
-        ordList.slice(0, 5).map(async (ord) => {
+        ordList.slice(0, 4).map(async (ord) => {
           const hasStatus =
             ord.trangThai || ord.trangThaiDonHang || ord.trangThaiDon || ord.status;
           if (hasStatus) return ord;
           try {
-            const dRes = await api.get(`/DonHang/${ord.maDonHang}`, { timeout: 4000 });
+            const dRes = await api.get(`/DonHang/${ord.maDonHang}`, { timeout: 3500 });
             return { ...ord, ...(dRes.data || {}) };
           } catch {
             return ord;
           }
         })
       );
-      ordList = [...topEnriched, ...ordList.slice(5)];
+      ordList = [...topEnriched, ...ordList.slice(4)];
       setOrders(ordList);
 
       try {
         const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
         localStorage.setItem(
           'thx_admin_fast_cache',
-          JSON.stringify({ ...prevCache, orders: ordList.slice(0, 150) })
+          JSON.stringify({ ...prevCache, orders: ordList.slice(0, 120) })
         );
       } catch {
         // Bỏ qua
@@ -523,12 +539,13 @@ export default function AdminDashboard() {
         return true;
       }
 
-      const reasonText = status ? `HTTP ${status}` : err?.message || 'Timeout';
+      const reasonText = status ? `HTTP ${status}` : 'Máy chủ phản hồi chậm';
       setApiError(
-        `Máy chủ Backend (${API_BASE_URL}) chưa trả về đơn hàng (${reasonText}). Bấm Đăng xuất -> Đăng nhập lại hoặc bấm Thử kết nối lại.`
+        `Chưa tải được đơn hàng (${reasonText}). Vui lòng đợi 5 giây rồi bấm "Thử kết nối lại".`
       );
       return false;
     } finally {
+      ordersFetchLockRef.current = false;
       setLoadingOrders(false);
     }
   }, [loadRecentOrdersFallback]);
@@ -682,7 +699,7 @@ export default function AdminDashboard() {
 
     try {
       setDeletingOrders(true);
-      const chunkSize = 8;
+      const chunkSize = 6;
       for (let i = 0; i < idsToDelete.length; i += chunkSize) {
         const chunk = idsToDelete.slice(i, i + chunkSize);
         await Promise.allSettled(chunk.map((id) => deleteOrderFromBackend(id)));
@@ -1244,11 +1261,12 @@ export default function AdminDashboard() {
           </div>
           <button
             type="button"
-            onClick={loadAllData}
+            onClick={loadOrdersOnly}
+            disabled={loadingOrders}
             className="btn btn-primary btn-sm"
             style={{ whiteSpace: 'nowrap' }}
           >
-            Thử kết nối lại
+            {loadingOrders ? 'Đang thử lại...' : 'Thử kết nối lại'}
           </button>
         </div>
       )}
