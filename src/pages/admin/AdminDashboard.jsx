@@ -54,6 +54,7 @@ import {
 } from '../../services/chatService';
 
 const PAGE_SIZE = 15;
+const CLOUD_BIN_URL = 'https://api.npoint.io/639a3cda635df1c41eb4';
 
 const FLOWER_CATEGORIES = [
   { id: 1, name: 'Bó hoa tươi nghệ thuật' },
@@ -77,6 +78,29 @@ const ADMIN_QUICK_REPLIES = [
   'Hoa tươi bên tiệm nhập mới mỗi sáng, tặng kèm thiệp chúc mừng miễn phí bạn nhé.',
   'Đơn hàng của bạn đang được thợ hoa chuẩn bị và sẽ giao đúng khung giờ đã đặt ạ!',
 ];
+
+function getCurrentYearMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function getOrderYearMonth(order) {
+  const raw =
+    order?.ngayDat || order?.thoiGianDat || order?.ngayTao || order?.ngayGiao;
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (!Number.isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+  const m = String(raw).match(/(\d{4})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}` : '';
+}
+
+function formatYearMonthLabel(ym) {
+  if (!ym || !ym.includes('-')) return 'tháng này';
+  const [y, m] = ym.split('-');
+  return `tháng ${m}/${y}`;
+}
 
 function compressImageFile(file, maxSize = 360, quality = 0.68) {
   return new Promise((resolve, reject) => {
@@ -197,9 +221,11 @@ export default function AdminDashboard() {
   const { user, showToast } = useApp();
   const [activeTab, setActiveTab] = useState('orders');
   const [loading, setLoading] = useState(false);
+  const [loadingOrders, setLoadingOrders] = useState(false);
   const [training, setTraining] = useState(false);
   const [apiError, setApiError] = useState('');
   const [hotlineInput, setHotlineInput] = useState(() => getHotlineNumber());
+  const [selectedMonth, setSelectedMonth] = useState(() => getCurrentYearMonth());
 
   const [orders, setOrders] = useState([]);
   const [products, setProducts] = useState([]);
@@ -223,6 +249,8 @@ export default function AdminDashboard() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [orderSearch, setOrderSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedOrderIds, setSelectedOrderIds] = useState([]);
+  const [deletingOrders, setDeletingOrders] = useState(false);
   const [productSearch, setProductSearch] = useState('');
 
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -272,7 +300,7 @@ export default function AdminDashboard() {
   }, [syncChats]);
 
   useEffect(() => {
-    const intervalMs = activeTab === 'messages' ? 4000 : 8000;
+    const intervalMs = activeTab === 'messages' ? 4000 : 10000;
     const timer = setInterval(() => {
       syncChatsFromCloud().then(() => syncChats());
       syncOrderMetaFromCloud().then((latest) => setOrderMetaMap(latest));
@@ -304,6 +332,64 @@ export default function AdminDashboard() {
     setOrderMetaMap(updated);
   };
 
+  const markOrdersDeletedBatch = async (orderIds) => {
+    if (!Array.isArray(orderIds) || orderIds.length === 0) return;
+    const now = Date.now();
+    const localCurrent = readLocalOrderMeta();
+    orderIds.forEach((id) => {
+      const idStr = String(id);
+      localCurrent[idStr] = {
+        ...(localCurrent[idStr] || {}),
+        deleted: true,
+        updatedAt: now,
+      };
+    });
+
+    try {
+      localStorage.setItem('thx_order_meta', JSON.stringify(localCurrent));
+      window.dispatchEvent(new Event('thx_orders_updated'));
+    } catch {
+      // Bỏ qua
+    }
+    setOrderMetaMap({ ...localCurrent });
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(CLOUD_BIN_URL, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      const raw = res.ok ? await res.json() : {};
+      const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+      const remoteMeta =
+        safeBin.__order_meta__ && typeof safeBin.__order_meta__ === 'object'
+          ? safeBin.__order_meta__
+          : {};
+
+      orderIds.forEach((id) => {
+        const idStr = String(id);
+        remoteMeta[idStr] = {
+          ...(remoteMeta[idStr] || {}),
+          deleted: true,
+          updatedAt: now,
+        };
+      });
+      safeBin.__order_meta__ = remoteMeta;
+
+      await fetch(CLOUD_BIN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(safeBin),
+      });
+    } catch {
+      // Giữ bản lưu cục bộ
+    }
+  };
+
   const buildFallbackForecast = useCallback((spList) => {
     setForecasts((prev) => {
       if (prev.length > 0) return prev;
@@ -323,9 +409,10 @@ export default function AdminDashboard() {
 
   const loadAllData = useCallback(async () => {
     setLoading(true);
+    setLoadingOrders(true);
     setApiError('');
 
-    // 1. Nạp ngay dữ liệu lưu tạm gần nhất để màn hình không bao giờ bị trống
+    // 1. Nạp ngay dữ liệu lưu tạm gần nhất để màn hình hiển thị tức thì
     try {
       const rawCache = localStorage.getItem('thx_admin_fast_cache');
       if (rawCache) {
@@ -347,15 +434,15 @@ export default function AdminDashboard() {
       // Bỏ qua lỗi đọc cache
     }
 
-    // 2. Đồng bộ đám mây chạy nền (không chặn giao diện)
+    // 2. Đồng bộ đám mây chạy nền
     syncOrderMetaFromCloud().then((latest) => setOrderMetaMap(latest));
     syncProductOverridesFromCloud().then(() => {
       setProducts((prev) => [...prev]);
     });
 
-    // 3. Tải danh sách sản phẩm độc lập (nhanh)
-    const loadProductsTask = api
-      .get('/SanPham', { timeout: 8000 })
+    // 3. Tải danh sách sản phẩm
+    api
+      .get('/SanPham', { timeout: 12000 })
       .then((res) => {
         const d = res.data;
         const spList = Array.isArray(d) ? d : d?.items || [];
@@ -366,13 +453,34 @@ export default function AdminDashboard() {
         });
         setProductMap(pMap);
         buildFallbackForecast(spList);
-        return spList;
-      })
-      .catch(() => []);
 
-    // 4. Tải danh sách đơn hàng độc lập (timeout 8 giây để không bị treo)
-    const loadOrdersTask = api
-      .get('/DonHang', { timeout: 8000 })
+        try {
+          const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
+          localStorage.setItem(
+            'thx_admin_fast_cache',
+            JSON.stringify({ ...prevCache, products: spList })
+          );
+        } catch {
+          // Bỏ qua
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+
+    // 4. Tải danh sách đơn hàng với thời gian chờ 25s (vì có nhiều đơn lịch sử)
+    const fetchOrdersWithRetry = async () => {
+      try {
+        return await api.get('/DonHang', { timeout: 25000 });
+      } catch (firstErr) {
+        if (firstErr?.response?.status === 401 || firstErr?.response?.status === 403) {
+          throw firstErr;
+        }
+        await new Promise((r) => setTimeout(r, 1200));
+        return await api.get('/DonHang', { timeout: 25000 });
+      }
+    };
+
+    fetchOrdersWithRetry()
       .then(async (res) => {
         setApiError('');
         const d = res.data;
@@ -385,7 +493,7 @@ export default function AdminDashboard() {
               ord.trangThai || ord.trangThaiDonHang || ord.trangThaiDon || ord.status;
             if (hasStatus) return ord;
             try {
-              const dRes = await api.get(`/DonHang/${ord.maDonHang}`, { timeout: 3000 });
+              const dRes = await api.get(`/DonHang/${ord.maDonHang}`, { timeout: 4000 });
               return { ...ord, ...(dRes.data || {}) };
             } catch {
               return ord;
@@ -394,7 +502,16 @@ export default function AdminDashboard() {
         );
         ordList = [...topEnriched, ...ordList.slice(5)];
         setOrders(ordList);
-        return ordList;
+
+        try {
+          const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
+          localStorage.setItem(
+            'thx_admin_fast_cache',
+            JSON.stringify({ ...prevCache, orders: ordList.slice(0, 150) })
+          );
+        } catch {
+          // Bỏ qua
+        }
       })
       .catch((err) => {
         const status = err?.response?.status;
@@ -404,64 +521,40 @@ export default function AdminDashboard() {
           );
         } else {
           setApiError(
-            'Danh sách đơn hàng từ máy chủ đang phản hồi chậm. Dữ liệu sẽ tự cập nhật khi bấm Làm mới.'
+            'Máy chủ Backend đang tải nhiều đơn hàng lịch sử nên phản hồi chậm. Bạn có thể bấm "Thử kết nối lại" hoặc xóa bớt đơn mẫu cũ.'
           );
         }
-        return [];
-      });
+      })
+      .finally(() => setLoadingOrders(false));
 
     // 5. Tải dự báo AI độc lập
-    const loadForecastTask = api
-      .get('/DuBao', { timeout: 4000 })
+    api
+      .get('/DuBao', { timeout: 5000 })
       .then((res) => res.data)
       .catch(() =>
         axios
-          .get(`${AI_BASE_URL}/forecast`, { timeout: 4000 })
+          .get(`${AI_BASE_URL}/forecast`, { timeout: 5000 })
           .then((res) => res.data)
           .catch(() => null)
-      );
+      )
+      .then((forecastData) => {
+        if (!forecastData) return;
+        const list =
+          forecastData.danhSachDuBao ||
+          forecastData.forecasts ||
+          forecastData.items ||
+          (Array.isArray(forecastData) ? forecastData : []);
+        if (list.length > 0) setForecasts(list);
 
-    // Chốt tắt trạng thái "Đang tải..." sau tối đa 8 giây bất kể mạng ra sao
-    const [spList, ordList, forecastData] = await Promise.all([
-      loadProductsTask,
-      loadOrdersTask,
-      loadForecastTask,
-    ]);
-
-    if (forecastData) {
-      const list =
-        forecastData.danhSachDuBao ||
-        forecastData.forecasts ||
-        forecastData.items ||
-        (Array.isArray(forecastData) ? forecastData : []);
-      if (list.length > 0) setForecasts(list);
-
-      if (forecastData.mae || forecastData.metrics?.mae) {
-        setModelMetrics((prev) => ({
-          ...prev,
-          modelName: forecastData.moHinh || forecastData.modelName || prev.modelName,
-          mae: forecastData.mae ?? forecastData.metrics?.mae ?? prev.mae,
-          rmse: forecastData.rmse ?? forecastData.metrics?.rmse ?? prev.rmse,
-        }));
-      }
-    }
-
-    if (spList.length > 0 || ordList.length > 0) {
-      try {
-        localStorage.setItem(
-          'thx_admin_fast_cache',
-          JSON.stringify({
-            products: spList,
-            orders: ordList.slice(0, 120),
-            savedAt: Date.now(),
-          })
-        );
-      } catch {
-        // Bỏ qua
-      }
-    }
-
-    setLoading(false);
+        if (forecastData.mae || forecastData.metrics?.mae) {
+          setModelMetrics((prev) => ({
+            ...prev,
+            modelName: forecastData.moHinh || forecastData.modelName || prev.modelName,
+            mae: forecastData.mae ?? forecastData.metrics?.mae ?? prev.mae,
+            rmse: forecastData.rmse ?? forecastData.metrics?.rmse ?? prev.rmse,
+          }));
+        }
+      });
   }, [buildFallbackForecast]);
 
   useEffect(() => {
@@ -471,6 +564,95 @@ export default function AdminDashboard() {
   useEffect(() => {
     setCurrentPage(1);
   }, [statusFilter, orderSearch]);
+
+  const deleteOrderFromBackend = async (orderId) => {
+    const deleteAttempts = [
+      () => api.delete(`/DonHang/${orderId}`),
+      () => api.delete(`/DonHang/delete/${orderId}`),
+      () => api.post(`/DonHang/${orderId}/delete`),
+    ];
+    for (const fn of deleteAttempts) {
+      try {
+        await fn();
+        return true;
+      } catch {
+        // Thử tiếp
+      }
+    }
+    return false;
+  };
+
+  const handleDeleteSingleOrder = async (order) => {
+    const orderId = order.maDonHang;
+    if (!window.confirm(`Bạn có chắc muốn xóa vĩnh viễn đơn hàng #${orderId} không?`)) return;
+
+    try {
+      setDeletingOrders(true);
+      await deleteOrderFromBackend(orderId);
+      await markOrdersDeletedBatch([orderId]);
+
+      setOrders((prev) => prev.filter((o) => o.maDonHang !== orderId));
+      setSelectedOrderIds((prev) => prev.filter((id) => id !== orderId));
+      if (selectedOrder?.maDonHang === orderId) {
+        setSelectedOrder(null);
+      }
+
+      try {
+        const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
+        if (Array.isArray(prevCache.orders)) {
+          prevCache.orders = prevCache.orders.filter((o) => o.maDonHang !== orderId);
+          localStorage.setItem('thx_admin_fast_cache', JSON.stringify(prevCache));
+        }
+      } catch {
+        // Bỏ qua
+      }
+
+      showToast(`Đã xóa đơn hàng #${orderId}!`);
+    } finally {
+      setDeletingOrders(false);
+    }
+  };
+
+  const handleBulkDeleteOrders = async (idsToDelete, labelText) => {
+    if (!Array.isArray(idsToDelete) || idsToDelete.length === 0) return;
+    if (
+      !window.confirm(
+        `Bạn có chắc muốn xóa ${idsToDelete.length} đơn hàng (${labelText}) không? Thao tác này giúp giảm tải dữ liệu và không thể hoàn tác.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setDeletingOrders(true);
+      // Xóa theo từng nhóm 10 đơn trên máy chủ SQL Server
+      const chunkSize = 10;
+      for (let i = 0; i < idsToDelete.length; i += chunkSize) {
+        const chunk = idsToDelete.slice(i, i + chunkSize);
+        await Promise.allSettled(chunk.map((id) => deleteOrderFromBackend(id)));
+      }
+
+      await markOrdersDeletedBatch(idsToDelete);
+
+      const idSet = new Set(idsToDelete);
+      setOrders((prev) => prev.filter((o) => !idSet.has(o.maDonHang)));
+      setSelectedOrderIds((prev) => prev.filter((id) => !idSet.has(id)));
+
+      try {
+        const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
+        if (Array.isArray(prevCache.orders)) {
+          prevCache.orders = prevCache.orders.filter((o) => !idSet.has(o.maDonHang));
+          localStorage.setItem('thx_admin_fast_cache', JSON.stringify(prevCache));
+        }
+      } catch {
+        // Bỏ qua
+      }
+
+      showToast(`Đã xóa thành công ${idsToDelete.length} đơn hàng!`);
+    } finally {
+      setDeletingOrders(false);
+    }
+  };
 
   const pushStatusToBackend = async (orderId, nextCode) => {
     if (nextCode === 'Cancelled') {
@@ -606,7 +788,7 @@ export default function AdminDashboard() {
           items = fetchedItems;
         }
       } catch {
-        // Dùng dữ liệu sẵn có nếu API chi tiết lỗi
+        // Dùng dữ liệu sẵn có
       }
 
       const enrichedItems = (items || []).map((it) => {
@@ -852,27 +1034,42 @@ export default function AdminDashboard() {
     return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   };
 
-  const completedRevenue = orders.reduce((sum, o) => {
+  // Loại bỏ các đơn đã bị Admin xóa
+  const activeOrders = orders.filter((o) => !orderMetaMap[o.maDonHang]?.deleted);
+
+  // Chỉ tính doanh thu các đơn hoàn tất trong tháng được chọn
+  const monthlyCompletedOrders = activeOrders.filter((o) => {
     const meta = orderMetaMap[o.maDonHang] || {};
     const st = normalizeAdminOrderStatus(extractRawStatus(o, meta));
-    if (st.code === 'Completed') {
-      return sum + (meta.grandTotal ?? o.tongThanhToan ?? o.tongTien ?? 0);
-    }
-    return sum;
+    if (st.code !== 'Completed') return false;
+    if (!selectedMonth) return true;
+    return getOrderYearMonth(o) === selectedMonth;
+  });
+
+  const monthlyRevenue = monthlyCompletedOrders.reduce((sum, o) => {
+    const meta = orderMetaMap[o.maDonHang] || {};
+    return sum + (meta.grandTotal ?? o.tongThanhToan ?? o.tongTien ?? 0);
   }, 0);
 
-  const pendingCount = orders.filter((o) => {
+  const pendingCount = activeOrders.filter((o) => {
     const meta = orderMetaMap[o.maDonHang] || {};
     const st = normalizeAdminOrderStatus(extractRawStatus(o, meta));
     return st.code === 'Pending' || st.code === 'Confirmed' || st.code === 'Shipping';
   }).length;
+
+  const oldDummyOrderIds = activeOrders
+    .filter((o) => {
+      const ym = getOrderYearMonth(o);
+      return ym && ym < getCurrentYearMonth();
+    })
+    .map((o) => o.maDonHang);
 
   const totalUnreadChats = conversations.reduce(
     (sum, c) => sum + (c.unreadByAdmin || 0),
     0
   );
 
-  const filteredOrders = orders.filter((o) => {
+  const filteredOrders = activeOrders.filter((o) => {
     const address = String(o.diaChiGiao || o.diaChi || '');
     const meta = orderMetaMap[o.maDonHang] || {};
     const isPickup =
@@ -897,6 +1094,24 @@ export default function AdminDashboard() {
   const safePage = Math.min(currentPage, totalPages);
   const startIndex = (safePage - 1) * PAGE_SIZE;
   const paginatedOrders = filteredOrders.slice(startIndex, startIndex + PAGE_SIZE);
+
+  const pageOrderIds = paginatedOrders.map((o) => o.maDonHang);
+  const isAllPageSelected =
+    pageOrderIds.length > 0 && pageOrderIds.every((id) => selectedOrderIds.includes(id));
+
+  const toggleSelectPageOrders = () => {
+    if (isAllPageSelected) {
+      setSelectedOrderIds((prev) => prev.filter((id) => !pageOrderIds.includes(id)));
+    } else {
+      setSelectedOrderIds((prev) => Array.from(new Set([...prev, ...pageOrderIds])));
+    }
+  };
+
+  const toggleSelectOneOrder = (orderId) => {
+    setSelectedOrderIds((prev) =>
+      prev.includes(orderId) ? prev.filter((id) => id !== orderId) : [...prev, orderId]
+    );
+  };
 
   const filteredProducts = products.filter((sp) => {
     if (!productSearch.trim()) return true;
@@ -968,12 +1183,12 @@ export default function AdminDashboard() {
               loadAllData();
               syncChatsFromCloud().then(() => syncChats());
             }}
-            disabled={loading}
+            disabled={loading || loadingOrders}
             className="btn btn-outline"
             title="Tải lại dữ liệu mới nhất"
           >
             <RefreshCw size={16} />
-            <span>{loading ? 'Đang đồng bộ...' : 'Làm mới'}</span>
+            <span>{loading || loadingOrders ? 'Đang tải...' : 'Làm mới'}</span>
           </button>
 
           <button
@@ -1091,12 +1306,13 @@ export default function AdminDashboard() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
           gap: 18,
           marginBottom: 24,
         }}
       >
-        <div className="panel" style={{ padding: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
+        {/* Thẻ Doanh thu hàng tháng */}
+        <div className="panel" style={{ padding: 20, display: 'flex', alignItems: 'center', gap: 14 }}>
           <div
             style={{
               width: 48,
@@ -1112,15 +1328,41 @@ export default function AdminDashboard() {
           >
             <DollarSign size={24} />
           </div>
-          <div>
-            <div style={{ fontSize: '0.82rem', color: '#6b7280', fontWeight: 500 }}>
-              Tổng doanh thu hoàn thành
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 6,
+                flexWrap: 'wrap',
+              }}
+            >
+              <span style={{ fontSize: '0.82rem', color: '#6b7280', fontWeight: 600 }}>
+                Doanh thu {formatYearMonthLabel(selectedMonth)}
+              </span>
+              <input
+                type="month"
+                aria-label="Chọn tháng tính doanh thu"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                style={{
+                  border: '1px solid #fecdd3',
+                  borderRadius: 8,
+                  padding: '2px 6px',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  color: '#be123c',
+                  background: '#fff1f2',
+                  cursor: 'pointer',
+                }}
+              />
             </div>
-            <div style={{ fontSize: '1.45rem', fontWeight: 700, color: '#e11d48', margin: '3px 0' }}>
-              {formatVND(completedRevenue)}
+            <div style={{ fontSize: '1.42rem', fontWeight: 800, color: '#e11d48', margin: '4px 0' }}>
+              {formatVND(monthlyRevenue)}
             </div>
             <div style={{ fontSize: '0.76rem', color: '#16a34a', fontWeight: 600 }}>
-              ↗ Dữ liệu 24 tháng + đơn hoàn tất
+              ✓ {monthlyCompletedOrders.length} đơn hoàn tất trong {formatYearMonthLabel(selectedMonth)}
             </div>
           </div>
         </div>
@@ -1143,10 +1385,10 @@ export default function AdminDashboard() {
           </div>
           <div>
             <div style={{ fontSize: '0.82rem', color: '#6b7280', fontWeight: 500 }}>
-              Tổng đơn hàng hệ thống
+              Tổng đơn hàng hiện có
             </div>
             <div style={{ fontSize: '1.45rem', fontWeight: 700, margin: '3px 0' }}>
-              {orders.length} đơn
+              {loadingOrders && activeOrders.length === 0 ? 'Đang tải...' : `${activeOrders.length} đơn`}
             </div>
             <div
               style={{
@@ -1224,7 +1466,7 @@ export default function AdminDashboard() {
           onClick={() => setActiveTab('orders')}
           className={activeTab === 'orders' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}
         >
-          <ShoppingBag size={15} /> Quản lý Đơn hàng ({orders.length})
+          <ShoppingBag size={15} /> Quản lý Đơn hàng ({activeOrders.length})
         </button>
 
         <button
@@ -1293,9 +1535,57 @@ export default function AdminDashboard() {
               marginBottom: 18,
             }}
           >
-            <h2 style={{ fontSize: '1.35rem', margin: 0 }}>Danh Sách Đơn Hàng Khách Đặt</h2>
+            <div>
+              <h2 style={{ fontSize: '1.35rem', margin: 0 }}>Danh Sách Đơn Hàng Khách Đặt</h2>
+              {loadingOrders && (
+                <div style={{ fontSize: '0.8rem', color: '#e11d48', marginTop: 4 }}>
+                  ⏳ Đang đồng bộ danh sách đơn hàng từ máy chủ SQL Server...
+                </div>
+              )}
+            </div>
 
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {selectedOrderIds.length > 0 && (
+                <button
+                  type="button"
+                  disabled={deletingOrders}
+                  onClick={() =>
+                    handleBulkDeleteOrders(
+                      selectedOrderIds,
+                      `${selectedOrderIds.length} đơn đang chọn`
+                    )
+                  }
+                  className="btn btn-primary btn-sm"
+                  style={{ background: '#dc2626' }}
+                >
+                  <Trash2 size={14} />
+                  <span>
+                    {deletingOrders
+                      ? 'Đang xóa...'
+                      : `Xóa (${selectedOrderIds.length}) đơn đã chọn`}
+                  </span>
+                </button>
+              )}
+
+              {oldDummyOrderIds.length > 0 && (
+                <button
+                  type="button"
+                  disabled={deletingOrders}
+                  onClick={() =>
+                    handleBulkDeleteOrders(
+                      oldDummyOrderIds,
+                      `toàn bộ ${oldDummyOrderIds.length} đơn mẫu cũ trước tháng hiện tại`
+                    )
+                  }
+                  className="btn btn-outline btn-sm"
+                  style={{ color: '#dc2626', borderColor: '#fecaca' }}
+                  title="Dọn bớt các đơn hàng mẫu từ những tháng trước để trang quản trị tải nhanh hơn"
+                >
+                  <Trash2 size={14} />
+                  <span>Xóa {oldDummyOrderIds.length} đơn cũ</span>
+                </button>
+              )}
+
               <div style={{ position: 'relative' }}>
                 <Search
                   size={15}
@@ -1308,7 +1598,7 @@ export default function AdminDashboard() {
                   placeholder="Tìm mã đơn, tên khách, SĐT..."
                   value={orderSearch}
                   onChange={(e) => setOrderSearch(e.target.value)}
-                  style={{ paddingLeft: 34, height: 38, fontSize: '0.86rem', width: 230 }}
+                  style={{ paddingLeft: 34, height: 38, fontSize: '0.86rem', width: 215 }}
                 />
               </div>
 
@@ -1316,9 +1606,9 @@ export default function AdminDashboard() {
                 className="form-control"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                style={{ height: 38, fontSize: '0.86rem', width: 215 }}
+                style={{ height: 38, fontSize: '0.86rem', width: 205 }}
               >
-                <option value="ALL">Tất cả trạng thái ({orders.length})</option>
+                <option value="ALL">Tất cả trạng thái ({activeOrders.length})</option>
                 <option value="Pending">Chờ xác nhận</option>
                 <option value="Confirmed">Đang cắm hoa</option>
                 <option value="Shipping">Shipper đang giao / Sẵn sàng</option>
@@ -1339,7 +1629,16 @@ export default function AdminDashboard() {
                     fontSize: '0.82rem',
                   }}
                 >
-                  <th style={{ padding: '12px 10px' }}>Mã Đơn</th>
+                  <th style={{ padding: '12px 8px', width: 34 }}>
+                    <input
+                      type="checkbox"
+                      aria-label="Chọn tất cả đơn trên trang"
+                      checked={isAllPageSelected}
+                      onChange={toggleSelectPageOrders}
+                      style={{ cursor: 'pointer', width: 15, height: 15 }}
+                    />
+                  </th>
+                  <th style={{ padding: '12px 8px' }}>Mã Đơn</th>
                   <th style={{ padding: '12px 10px' }}>Khách nhận &amp; Hình thức</th>
                   <th style={{ padding: '12px 10px' }}>Ngày đặt / Giao</th>
                   <th style={{ padding: '12px 10px' }}>Tổng tiền</th>
@@ -1351,9 +1650,9 @@ export default function AdminDashboard() {
               <tbody>
                 {paginatedOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: 32, color: '#6b7280' }}>
-                      {loading
-                        ? 'Đang tải danh sách đơn hàng...'
+                    <td colSpan={8} style={{ textAlign: 'center', padding: 32, color: '#6b7280' }}>
+                      {loadingOrders
+                        ? 'Đang tải danh sách đơn hàng từ máy chủ, vui lòng đợi trong giây lát...'
                         : 'Không tìm thấy đơn hàng nào phù hợp với điều kiện lọc.'}
                     </td>
                   </tr>
@@ -1388,14 +1687,29 @@ export default function AdminDashboard() {
 
                     const totalMoney =
                       meta.grandTotal ?? order.tongThanhToan ?? order.tongTien ?? 0;
-                    const isBusy = updatingOrderId === order.maDonHang;
+                    const isBusy = updatingOrderId === order.maDonHang || deletingOrders;
+                    const isChecked = selectedOrderIds.includes(order.maDonHang);
 
                     return (
                       <tr
                         key={order.maDonHang}
-                        style={{ borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}
+                        style={{
+                          borderBottom: '1px solid #f3f4f6',
+                          verticalAlign: 'middle',
+                          background: isChecked ? '#fff1f2' : 'transparent',
+                        }}
                       >
-                        <td style={{ padding: '13px 10px', fontWeight: 700 }}>
+                        <td style={{ padding: '13px 8px' }}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Chọn đơn #${order.maDonHang}`}
+                            checked={isChecked}
+                            onChange={() => toggleSelectOneOrder(order.maDonHang)}
+                            style={{ cursor: 'pointer', width: 15, height: 15 }}
+                          />
+                        </td>
+
+                        <td style={{ padding: '13px 8px', fontWeight: 700 }}>
                           #{order.maDonHang}
                         </td>
 
@@ -1482,7 +1796,7 @@ export default function AdminDashboard() {
                               fontWeight: 700,
                               cursor: 'pointer',
                               outline: 'none',
-                              minWidth: 175,
+                              minWidth: 170,
                             }}
                           >
                             <option value="Pending">Chờ xác nhận</option>
@@ -1569,6 +1883,17 @@ export default function AdminDashboard() {
                             >
                               <Eye size={14} />
                               <span>Chi tiết</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => handleDeleteSingleOrder(order)}
+                              className="btn btn-outline btn-sm"
+                              title={`Xóa đơn hàng #${order.maDonHang}`}
+                              style={{ color: '#dc2626', borderColor: '#fecaca', padding: '6px 9px' }}
+                            >
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </td>
