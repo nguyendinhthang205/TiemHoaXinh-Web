@@ -40,7 +40,7 @@ const FEATURED_CATEGORIES = [
 
 export default function HomePage() {
   const appCtx = useApp() || {};
-  const { addToCart, showToast } = appCtx;
+  const { addToCart } = appCtx;
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -73,11 +73,8 @@ export default function HomePage() {
   };
 
   const handleQuickAdd = (sp) => {
-    if (typeof addToCart === 'function') {
-      addToCart(sp, 1);
-    }
-    if (typeof showToast === 'function') {
-      showToast(`Đã thêm "${sp.tenSanPham}" vào giỏ hàng!`);
+    if (typeof addToCart === 'function' && sp?.maSanPham) {
+      addToCart(sp.maSanPham, 1);
     }
   };
 
@@ -336,7 +333,7 @@ export default function HomePage() {
           {FEATURED_CATEGORIES.map((cat) => (
             <Link
               key={cat.id}
-              to={`/shop?category=${cat.id}`}
+              to={`/shop?danhMuc=${cat.id}`}
               className="panel"
               style={{
                 padding: 18,
@@ -490,6 +487,7 @@ export default function HomePage() {
                     type="button"
                     onClick={() => handleQuickAdd(sp)}
                     className="btn btn-primary btn-sm"
+                    disabled={sp.soLuongTon === 0}
                   >
                     <ShoppingCart size={14} />
                     <span>Thêm</span>
