@@ -96,7 +96,6 @@ export async function syncOrderMetaFromCloud() {
     let localChanged = false;
     let shouldPushBack = false;
 
-    // 1. Nhận trạng thái mới nhất từ đám mây về máy hiện tại
     Object.entries(remoteMeta).forEach(([orderId, rItem]) => {
       if (!rItem || typeof rItem !== 'object') return;
       const lItem = merged[orderId];
@@ -110,7 +109,6 @@ export async function syncOrderMetaFromCloud() {
       }
     });
 
-    // 2. Đẩy các thay đổi cục bộ chưa có trên đám mây lên (ví dụ đơn #763 Admin vừa chỉnh)
     Object.entries(localMeta).forEach(([orderId, lItem]) => {
       if (!lItem || typeof lItem !== 'object') return;
       const rItem = remoteMeta[orderId];
@@ -161,7 +159,7 @@ export async function writeOrderMeta(orderId, patch) {
     localStorage.setItem(ORDER_META_KEY, JSON.stringify(localCurrent));
     window.dispatchEvent(new Event('thx_orders_updated'));
   } catch {
-    // Bỏ qua lỗi bộ nhớ cục bộ
+    // Bỏ qua
   }
 
   try {
@@ -194,25 +192,121 @@ export async function writeOrderMeta(orderId, patch) {
 export function getProductOverrides() {
   try {
     const raw = localStorage.getItem(PRODUCT_SYNC_KEY);
-    return raw ? JSON.parse(raw) : {};
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
 }
 
-export function saveProductOverride(key, patch) {
-  if (!key) return;
+export async function syncProductOverridesFromCloud() {
+  const localOverrides = getProductOverrides();
   try {
-    const current = getProductOverrides();
-    current[String(key)] = {
-      ...(current[String(key)] || {}),
-      ...patch,
-      updatedAt: Date.now(),
-    };
+    const res = await fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' });
+    if (!res.ok) return localOverrides;
+    const raw = await res.json();
+    const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const remoteOverrides =
+      safeBin.__product_overrides__ &&
+      typeof safeBin.__product_overrides__ === 'object' &&
+      !Array.isArray(safeBin.__product_overrides__)
+        ? safeBin.__product_overrides__
+        : {};
+
+    const merged = { ...localOverrides };
+    let localChanged = false;
+    let shouldPushBack = false;
+
+    // 1. Tải ảnh & thông tin cập nhật mới nhất từ đám mây về thiết bị hiện tại
+    Object.entries(remoteOverrides).forEach(([key, rItem]) => {
+      if (!rItem || typeof rItem !== 'object') return;
+      const lItem = merged[key];
+      const rTime = Number(rItem.updatedAt || 0);
+      const lTime = Number(lItem?.updatedAt || 0);
+      if (!lItem || rTime >= lTime) {
+        if (JSON.stringify(lItem) !== JSON.stringify(rItem)) {
+          merged[key] = { ...(lItem || {}), ...rItem };
+          localChanged = true;
+        }
+      }
+    });
+
+    // 2. Đẩy các ảnh Admin đã chọn trên máy tính nhưng chưa lên đám mây
+    Object.entries(localOverrides).forEach(([key, lItem]) => {
+      if (!lItem || typeof lItem !== 'object') return;
+      const rItem = remoteOverrides[key];
+      const lTime = Number(lItem.updatedAt || 0);
+      const rTime = Number(rItem?.updatedAt || 0);
+      if ((!rItem && lItem.hinhAnhChinh) || lTime > rTime) {
+        const stamped = { ...lItem, updatedAt: lTime || Date.now() };
+        merged[key] = stamped;
+        remoteOverrides[key] = stamped;
+        shouldPushBack = true;
+      }
+    });
+
+    if (localChanged || shouldPushBack) {
+      localStorage.setItem(PRODUCT_SYNC_KEY, JSON.stringify(merged));
+      window.dispatchEvent(new Event('thx_products_updated'));
+    }
+
+    if (shouldPushBack) {
+      safeBin.__product_overrides__ = remoteOverrides;
+      await fetch(CLOUD_BIN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(safeBin),
+      });
+    }
+
+    return merged;
+  } catch {
+    return localOverrides;
+  }
+}
+
+export async function saveProductOverride(key, patch) {
+  if (!key) return;
+  const keyStr = String(key);
+  const now = Date.now();
+
+  const current = getProductOverrides();
+  const nextEntry = {
+    ...(current[keyStr] || {}),
+    ...patch,
+    updatedAt: now,
+  };
+  current[keyStr] = nextEntry;
+
+  try {
     localStorage.setItem(PRODUCT_SYNC_KEY, JSON.stringify(current));
     window.dispatchEvent(new Event('thx_products_updated'));
   } catch {
-    // Bỏ qua
+    // Bỏ qua nếu bộ nhớ cục bộ đầy
+  }
+
+  try {
+    const res = await fetch(CLOUD_BIN_URL, { method: 'GET', cache: 'no-store' });
+    const raw = res.ok ? await res.json() : {};
+    const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const remoteOverrides =
+      safeBin.__product_overrides__ && typeof safeBin.__product_overrides__ === 'object'
+        ? safeBin.__product_overrides__
+        : {};
+
+    remoteOverrides[keyStr] = {
+      ...(remoteOverrides[keyStr] || {}),
+      ...nextEntry,
+    };
+    safeBin.__product_overrides__ = remoteOverrides;
+
+    await fetch(CLOUD_BIN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(safeBin),
+    });
+  } catch {
+    // Giữ bản lưu cục bộ nếu mạng gián đoạn
   }
 }
 
@@ -230,7 +324,7 @@ function mergeProductOverride(product) {
 
   return {
     ...product,
-    anhChinh: matched.anhChinh || matched.hinhAnhChinh || product.anhChinh,
+    anhChinh: matched.hinhAnhChinh || matched.anhChinh || product.anhChinh,
     hinhAnhChinh: matched.hinhAnhChinh || product.hinhAnhChinh,
     hinhAnh: matched.hinhAnhChinh || product.hinhAnh,
     tongMauSac: matched.tongMauSac || product.tongMauSac,

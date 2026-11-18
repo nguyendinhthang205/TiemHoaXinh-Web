@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import api from '../services/api';
+import api, {
+  syncProductOverridesFromCloud,
+  syncHotlineFromCloud,
+} from '../services/api';
 
 const AppContext = createContext(null);
 
@@ -36,6 +39,18 @@ export function AppProvider({ children }) {
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4500);
+  }, []);
+
+  useEffect(() => {
+    syncProductOverridesFromCloud();
+    syncHotlineFromCloud();
+
+    const handleFocus = () => {
+      syncProductOverridesFromCloud();
+      syncHotlineFromCloud();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, []);
 
   const fetchCart = useCallback(async () => {

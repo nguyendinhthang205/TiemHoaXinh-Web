@@ -38,6 +38,7 @@ import api, {
   formatVND,
   getFlowerImage,
   saveProductOverride,
+  syncProductOverridesFromCloud,
   getHotlineNumber,
   saveHotlineNumber,
   readLocalOrderMeta,
@@ -77,7 +78,7 @@ const ADMIN_QUICK_REPLIES = [
   'Đơn hàng của bạn đang được thợ hoa chuẩn bị và sẽ giao đúng khung giờ đã đặt ạ!',
 ];
 
-function compressImageFile(file, maxSize = 800, quality = 0.82) {
+function compressImageFile(file, maxSize = 520, quality = 0.75) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -321,8 +322,10 @@ export default function AdminDashboard() {
       setLoading(true);
       setApiError('');
 
+      // Đồng bộ lần lượt trạng thái đơn hàng và hình ảnh sản phẩm với đám mây
       const syncedMeta = await syncOrderMetaFromCloud();
       setOrderMetaMap(syncedMeta);
+      await syncProductOverridesFromCloud();
 
       const [spResult, ordResult] = await Promise.allSettled([
         fetchWithRetry('/SanPham', 1),
@@ -688,7 +691,7 @@ export default function AdminDashboard() {
       return;
     }
     try {
-      const compressedDataUrl = await compressImageFile(file, 800, 0.82);
+      const compressedDataUrl = await compressImageFile(file, 520, 0.75);
       setImageFileName(file.name);
       setProductForm((prev) => ({
         ...prev,
@@ -763,7 +766,7 @@ export default function AdminDashboard() {
             throw err;
           }
         }
-        showToast(`Đã cập nhật bó hoa "${cleanName}"!`);
+        showToast(`Đã cập nhật & đồng bộ bó hoa "${cleanName}"!`);
       }
 
       const overridePatch = {
@@ -776,9 +779,9 @@ export default function AdminDashboard() {
           : savedData?.maSanPham ?? savedData?.MaSanPham;
 
       if (resolvedId != null) {
-        saveProductOverride(resolvedId, overridePatch);
+        await saveProductOverride(resolvedId, overridePatch);
       }
-      saveProductOverride(`name:${cleanName.toLowerCase()}`, overridePatch);
+      await saveProductOverride(`name:${cleanName.toLowerCase()}`, overridePatch);
 
       setProductModal(null);
       await loadAllData();
@@ -891,6 +894,20 @@ export default function AdminDashboard() {
 
   return (
     <div className="container" style={{ marginTop: 28, marginBottom: 48 }}>
+      <style>{`
+        .thx-admin-chat-grid {
+          display: grid;
+          grid-template-columns: minmax(260px, 320px) 1fr;
+          min-height: 520px;
+        }
+        @media (max-width: 768px) {
+          .thx-admin-chat-grid {
+            grid-template-columns: 1fr;
+            min-height: auto;
+          }
+        }
+      `}</style>
+
       {/* Header Admin */}
       <div
         style={{
@@ -1592,13 +1609,10 @@ export default function AdminDashboard() {
           {/* TAB 2: TIN NHẮN KHÁCH HÀNG */}
           {activeTab === 'messages' && (
             <div
-              className="panel"
+              className="panel thx-admin-chat-grid"
               style={{
                 padding: 0,
                 overflow: 'hidden',
-                display: 'grid',
-                gridTemplateColumns: 'minmax(260px, 320px) 1fr',
-                minHeight: 520,
               }}
             >
               <div
