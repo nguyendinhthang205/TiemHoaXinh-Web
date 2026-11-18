@@ -102,7 +102,7 @@ function formatYearMonthLabel(ym) {
   return `tháng ${m}/${y}`;
 }
 
-function compressImageFile(file, maxSize = 360, quality = 0.68) {
+function compressImageFile(file, maxSize = 240, quality = 0.62) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -407,7 +407,7 @@ export default function AdminDashboard() {
     });
   }, []);
 
-  // Dọn chuỗi ảnh base64 nặng ra khỏi SQL Server (giữ ảnh ở cloud override) để /DonHang không bị quá tải
+  // Dọn chuỗi ảnh base64 nặng ra khỏi SQL Server để API /DonHang không bị quá tải
   const stripHeavyBase64FromSql = useCallback(async (spList) => {
     const heavyItems = spList.filter((p) => {
       const img1 = String(p.hinhAnhChinh || '');
@@ -425,20 +425,6 @@ export default function AdminDashboard() {
     if (heavyItems.length === 0) return false;
 
     for (const p of heavyItems) {
-      const rawImg = p.hinhAnhChinh || p.hinhAnh || p.anhChinh || '';
-      if (rawImg.startsWith('data:image/')) {
-        await saveProductOverride(p.maSanPham, {
-          hinhAnhChinh: rawImg,
-          tongMauSac: p.tongMauSac || 'Tông Hồng Pastel',
-        });
-        if (p.tenSanPham) {
-          await saveProductOverride(`name:${String(p.tenSanPham).trim().toLowerCase()}`, {
-            hinhAnhChinh: rawImg,
-            tongMauSac: p.tongMauSac || 'Tông Hồng Pastel',
-          });
-        }
-      }
-
       try {
         await api.put(`/SanPham/${p.maSanPham}`, {
           maSanPham: p.maSanPham,
@@ -453,35 +439,32 @@ export default function AdminDashboard() {
           trangThai: p.trangThai ?? true,
         });
       } catch {
-        // Bỏ qua nếu sản phẩm không sửa được
+        // Bỏ qua
       }
     }
     return true;
   }, []);
 
-  // Cơ chế tải dự phòng các đơn gần nhất theo mã đơn nếu danh sách tổng /DonHang quá tải
+  // Tải dự phòng 20 đơn gần nhất theo từng nhóm nhỏ 4 đơn (không gây nghẽn MonsterASP)
   const loadRecentOrdersFallback = useCallback(async () => {
     const metaKeys = Object.keys(readLocalOrderMeta())
       .map((k) => Number(k))
       .filter((n) => Number.isFinite(n) && n > 0);
-    const maxKnownId = metaKeys.length > 0 ? Math.max(...metaKeys) : 770;
-    const startId = Math.max(maxKnownId + 5, 770);
-
-    const candidateIds = [];
-    for (let id = startId; id >= Math.max(1, startId - 35); id -= 1) {
-      candidateIds.push(id);
-    }
-
-    const results = await Promise.allSettled(
-      candidateIds.map((id) => api.get(`/DonHang/${id}`, { timeout: 5000 }))
-    );
+    const maxKnownId = metaKeys.length > 0 ? Math.max(...metaKeys) : 765;
+    const startId = Math.max(maxKnownId + 3, 765);
 
     const recovered = [];
-    results.forEach((r) => {
-      if (r.status === 'fulfilled' && r.value?.data?.maDonHang) {
-        recovered.push(r.value.data);
-      }
-    });
+    for (let id = startId; id >= Math.max(1, startId - 19); id -= 4) {
+      const batch = [id, id - 1, id - 2, id - 3].filter((x) => x >= 1);
+      const resList = await Promise.allSettled(
+        batch.map((orderId) => api.get(`/DonHang/${orderId}`, { timeout: 6000 }))
+      );
+      resList.forEach((r) => {
+        if (r.status === 'fulfilled' && r.value?.data?.maDonHang) {
+          recovered.push(r.value.data);
+        }
+      });
+    }
 
     recovered.sort((a, b) => (b.maDonHang || 0) - (a.maDonHang || 0));
     return recovered;
@@ -490,7 +473,7 @@ export default function AdminDashboard() {
   const loadOrdersOnly = useCallback(async () => {
     setLoadingOrders(true);
     try {
-      const res = await api.get('/DonHang', { timeout: 25000 });
+      const res = await api.get('/DonHang', { timeout: 30000 });
       setApiError('');
       const d = res.data;
       let ordList = Array.isArray(d) ? d : d?.items || d?.data || [];
@@ -531,19 +514,18 @@ export default function AdminDashboard() {
         return false;
       }
 
-      // Thử nạp dự phòng các đơn hàng gần nhất theo ID
       const fallbackList = await loadRecentOrdersFallback();
       if (fallbackList.length > 0) {
         setOrders(fallbackList);
         setApiError(
-          `Đang hiển thị ${fallbackList.length} đơn hàng mới nhất (Danh sách tổng đang quá tải, hãy bấm "Xóa đơn cũ" nếu cần).`
+          `Đang hiển thị ${fallbackList.length} đơn hàng mới nhất (Danh sách tổng đang quá tải trên máy chủ).`
         );
         return true;
       }
 
       const reasonText = status ? `HTTP ${status}` : err?.message || 'Timeout';
       setApiError(
-        `Chưa tải được danh sách đơn hàng từ máy chủ (${reasonText}). Vui lòng bấm "Thử kết nối lại".`
+        `Máy chủ Backend (${API_BASE_URL}) chưa trả về đơn hàng (${reasonText}). Bấm Đăng xuất -> Đăng nhập lại hoặc bấm Thử kết nối lại.`
       );
       return false;
     } finally {
@@ -555,7 +537,6 @@ export default function AdminDashboard() {
     setLoading(true);
     setApiError('');
 
-    // 1. Nạp ngay dữ liệu lưu tạm gần nhất để màn hình không bị trống
     try {
       const rawCache = localStorage.getItem('thx_admin_fast_cache');
       if (rawCache) {
@@ -577,13 +558,11 @@ export default function AdminDashboard() {
       // Bỏ qua
     }
 
-    // 2. Đồng bộ đám mây chạy nền
     syncOrderMetaFromCloud().then((latest) => setOrderMetaMap(latest));
     syncProductOverridesFromCloud().then(() => {
       setProducts((prev) => [...prev]);
     });
 
-    // 3. Tải sản phẩm trước và tự dọn ảnh base64 nặng khỏi SQL Server nếu có
     api
       .get('/SanPham', { timeout: 12000 })
       .then(async (res) => {
@@ -609,17 +588,14 @@ export default function AdminDashboard() {
 
         const cleanedHeavySql = await stripHeavyBase64FromSql(spList);
         if (cleanedHeavySql) {
-          // Gọi lại /DonHang sau khi đã làm sạch chuỗi ảnh nặng trong SQL Server
           loadOrdersOnly();
         }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
 
-    // 4. Tải danh sách đơn hàng
     loadOrdersOnly();
 
-    // 5. Tải dự báo AI độc lập
     api
       .get('/DuBao', { timeout: 5000 })
       .then((res) => res.data)
@@ -688,17 +664,6 @@ export default function AdminDashboard() {
       if (selectedOrder?.maDonHang === orderId) {
         setSelectedOrder(null);
       }
-
-      try {
-        const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
-        if (Array.isArray(prevCache.orders)) {
-          prevCache.orders = prevCache.orders.filter((o) => o.maDonHang !== orderId);
-          localStorage.setItem('thx_admin_fast_cache', JSON.stringify(prevCache));
-        }
-      } catch {
-        // Bỏ qua
-      }
-
       showToast(`Đã xóa đơn hàng #${orderId}!`);
     } finally {
       setDeletingOrders(false);
@@ -709,7 +674,7 @@ export default function AdminDashboard() {
     if (!Array.isArray(idsToDelete) || idsToDelete.length === 0) return;
     if (
       !window.confirm(
-        `Bạn có chắc muốn xóa ${idsToDelete.length} đơn hàng (${labelText}) không? Thao tác này giúp giảm tải dữ liệu và không thể hoàn tác.`
+        `Bạn có chắc muốn xóa ${idsToDelete.length} đơn hàng (${labelText}) không?`
       )
     ) {
       return;
@@ -717,7 +682,7 @@ export default function AdminDashboard() {
 
     try {
       setDeletingOrders(true);
-      const chunkSize = 10;
+      const chunkSize = 8;
       for (let i = 0; i < idsToDelete.length; i += chunkSize) {
         const chunk = idsToDelete.slice(i, i + chunkSize);
         await Promise.allSettled(chunk.map((id) => deleteOrderFromBackend(id)));
@@ -728,17 +693,6 @@ export default function AdminDashboard() {
       const idSet = new Set(idsToDelete);
       setOrders((prev) => prev.filter((o) => !idSet.has(o.maDonHang)));
       setSelectedOrderIds((prev) => prev.filter((id) => !idSet.has(id)));
-
-      try {
-        const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
-        if (Array.isArray(prevCache.orders)) {
-          prevCache.orders = prevCache.orders.filter((o) => !idSet.has(o.maDonHang));
-          localStorage.setItem('thx_admin_fast_cache', JSON.stringify(prevCache));
-        }
-      } catch {
-        // Bỏ qua
-      }
-
       showToast(`Đã xóa thành công ${idsToDelete.length} đơn hàng!`);
     } finally {
       setDeletingOrders(false);
@@ -925,7 +879,7 @@ export default function AdminDashboard() {
       showToast('Đã huấn luyện lại mô hình AI Linear Regression thành công!');
       await loadAllData();
     } catch {
-      showToast('Không kết nối được dịch vụ Python AI (cổng 8000) để huấn luyện.', 'error');
+      showToast('Không kết nối được dịch vụ Python AI để huấn luyện.', 'error');
     } finally {
       setTraining(false);
     }
@@ -989,7 +943,7 @@ export default function AdminDashboard() {
       return;
     }
     try {
-      const compressedDataUrl = await compressImageFile(file, 360, 0.68);
+      const compressedDataUrl = await compressImageFile(file, 240, 0.62);
       setImageFileName(file.name);
       setProductForm((prev) => ({
         ...prev,
@@ -1014,7 +968,6 @@ export default function AdminDashboard() {
 
     try {
       setSavingProduct(true);
-      // Không gửi chuỗi base64 vào SQL Server để giữ API /DonHang luôn nhẹ; ảnh lưu qua cloud override
       const sqlPayload = {
         tenSanPham: cleanName,
         maDanhMuc: Number(productForm.maDanhMuc),
@@ -1375,7 +1328,6 @@ export default function AdminDashboard() {
           marginBottom: 24,
         }}
       >
-        {/* Thẻ Doanh thu hàng tháng */}
         <div className="panel" style={{ padding: 20, display: 'flex', alignItems: 'center', gap: 14 }}>
           <div
             style={{
@@ -1643,7 +1595,6 @@ export default function AdminDashboard() {
                   }
                   className="btn btn-outline btn-sm"
                   style={{ color: '#dc2626', borderColor: '#fecaca' }}
-                  title="Dọn bớt các đơn hàng mẫu từ những tháng trước để trang quản trị tải nhanh hơn"
                 >
                   <Trash2 size={14} />
                   <span>Xóa {oldDummyOrderIds.length} đơn cũ</span>

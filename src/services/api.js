@@ -16,7 +16,7 @@ const PRODUCT_SYNC_KEY = 'thx_product_overrides';
 const HOTLINE_STORAGE_KEY = 'thx_hotline_number';
 export const DEFAULT_HOTLINE = '0905 123 456';
 
-async function fetchCloudWithTimeout(options = {}, timeoutMs = 5000) {
+async function fetchCloudWithTimeout(options = {}, timeoutMs = 6000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -27,6 +27,40 @@ async function fetchCloudWithTimeout(options = {}, timeoutMs = 5000) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Tự động cắt gọn các ảnh base64 cũ nếu gói JSON trên npoint.io vượt 75KB để tránh lỗi nghẽn 413
+function compactCloudBin(rawBin) {
+  const safeBin = rawBin && typeof rawBin === 'object' && !Array.isArray(rawBin) ? { ...rawBin } : {};
+  const overrides = safeBin.__product_overrides__;
+  if (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) {
+    const entries = Object.entries(overrides).sort(
+      (a, b) => Number(b[1]?.updatedAt || 0) - Number(a[1]?.updatedAt || 0)
+    );
+    const kept = {};
+    for (const [k, val] of entries) {
+      kept[k] = val;
+      if (JSON.stringify(safeBin).length > 75000) {
+        if (kept[k]?.hinhAnhChinh?.startsWith('data:image/')) {
+          delete kept[k].hinhAnhChinh;
+        }
+      }
+    }
+    safeBin.__product_overrides__ = kept;
+  }
+  return safeBin;
+}
+
+async function pushCompactCloudBin(rawBin) {
+  const compacted = compactCloudBin(rawBin);
+  return fetchCloudWithTimeout(
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(compacted),
+    },
+    6000
+  );
 }
 
 export function getHotlineNumber() {
@@ -40,7 +74,7 @@ export function getHotlineNumber() {
 
 export async function syncHotlineFromCloud() {
   try {
-    const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 4500);
+    const res = await fetchCloudWithTimeout({ method: 'GET', cache: 'no-store' }, 5000);
     if (!res.ok) return getHotlineNumber();
     const raw = await res.json();
     const remoteHotline = typeof raw?.__hotline__ === 'string' ? raw.__hotline__.trim() : '';
@@ -50,7 +84,7 @@ export async function syncHotlineFromCloud() {
       return remoteHotline;
     }
   } catch {
-    // Bỏ qua nếu quá thời gian chờ
+    // Bỏ qua nếu mạng chậm
   }
   return getHotlineNumber();
 }
@@ -70,14 +104,7 @@ export function saveHotlineNumber(newPhone) {
     .then((raw) => {
       const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
       safeBin.__hotline__ = cleaned;
-      return fetchCloudWithTimeout(
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(safeBin),
-        },
-        5000
-      );
+      return pushCompactCloudBin(safeBin);
     })
     .catch(() => {});
 
@@ -101,6 +128,7 @@ export async function syncOrderMetaFromCloud() {
     if (!res.ok) return localMeta;
     const raw = await res.json();
     const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const isOversized = JSON.stringify(safeBin).length > 78000;
     const remoteMeta =
       safeBin.__order_meta__ &&
       typeof safeBin.__order_meta__ === 'object' &&
@@ -110,7 +138,7 @@ export async function syncOrderMetaFromCloud() {
 
     const merged = { ...localMeta };
     let localChanged = false;
-    let shouldPushBack = false;
+    let shouldPushBack = isOversized;
 
     Object.entries(remoteMeta).forEach(([orderId, rItem]) => {
       if (!rItem || typeof rItem !== 'object') return;
@@ -130,7 +158,7 @@ export async function syncOrderMetaFromCloud() {
       const rItem = remoteMeta[orderId];
       const lTime = Number(lItem.updatedAt || 0);
       const rTime = Number(rItem?.updatedAt || 0);
-      if ((!rItem && lItem.statusOverride) || lTime > rTime) {
+      if ((!rItem && (lItem.statusOverride || lItem.deleted)) || lTime > rTime) {
         const stamped = { ...lItem, updatedAt: lTime || Date.now() };
         merged[orderId] = stamped;
         remoteMeta[orderId] = stamped;
@@ -145,14 +173,7 @@ export async function syncOrderMetaFromCloud() {
 
     if (shouldPushBack) {
       safeBin.__order_meta__ = remoteMeta;
-      await fetchCloudWithTimeout(
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(safeBin),
-        },
-        5000
-      );
+      await pushCompactCloudBin(safeBin);
     }
 
     return merged;
@@ -196,14 +217,7 @@ export async function writeOrderMeta(orderId, patch) {
     };
     safeBin.__order_meta__ = remoteMeta;
 
-    await fetchCloudWithTimeout(
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(safeBin),
-      },
-      5000
-    );
+    await pushCompactCloudBin(safeBin);
   } catch {
     // Giữ bản lưu cục bộ nếu mạng gián đoạn
   }
@@ -272,14 +286,7 @@ export async function syncProductOverridesFromCloud() {
 
     if (shouldPushBack) {
       safeBin.__product_overrides__ = remoteOverrides;
-      await fetchCloudWithTimeout(
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(safeBin),
-        },
-        5000
-      );
+      await pushCompactCloudBin(safeBin);
     }
 
     return merged;
@@ -323,14 +330,7 @@ export async function saveProductOverride(key, patch) {
     };
     safeBin.__product_overrides__ = remoteOverrides;
 
-    await fetchCloudWithTimeout(
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(safeBin),
-      },
-      5000
-    );
+    await pushCompactCloudBin(safeBin);
   } catch {
     // Giữ bản lưu cục bộ nếu mạng gián đoạn
   }
