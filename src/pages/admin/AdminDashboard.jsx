@@ -300,7 +300,7 @@ export default function AdminDashboard() {
   }, [syncChats]);
 
   useEffect(() => {
-    const intervalMs = activeTab === 'messages' ? 4000 : 10000;
+    const intervalMs = activeTab === 'messages' ? 4000 : 12000;
     const timer = setInterval(() => {
       syncChatsFromCloud().then(() => syncChats());
       syncOrderMetaFromCloud().then((latest) => setOrderMetaMap(latest));
@@ -407,12 +407,155 @@ export default function AdminDashboard() {
     });
   }, []);
 
+  // Dọn chuỗi ảnh base64 nặng ra khỏi SQL Server (giữ ảnh ở cloud override) để /DonHang không bị quá tải
+  const stripHeavyBase64FromSql = useCallback(async (spList) => {
+    const heavyItems = spList.filter((p) => {
+      const img1 = String(p.hinhAnhChinh || '');
+      const img2 = String(p.hinhAnh || '');
+      const img3 = String(p.anhChinh || '');
+      return (
+        img1.startsWith('data:image/') ||
+        img2.startsWith('data:image/') ||
+        img3.startsWith('data:image/') ||
+        img1.length > 600 ||
+        img2.length > 600
+      );
+    });
+
+    if (heavyItems.length === 0) return false;
+
+    for (const p of heavyItems) {
+      const rawImg = p.hinhAnhChinh || p.hinhAnh || p.anhChinh || '';
+      if (rawImg.startsWith('data:image/')) {
+        await saveProductOverride(p.maSanPham, {
+          hinhAnhChinh: rawImg,
+          tongMauSac: p.tongMauSac || 'Tông Hồng Pastel',
+        });
+        if (p.tenSanPham) {
+          await saveProductOverride(`name:${String(p.tenSanPham).trim().toLowerCase()}`, {
+            hinhAnhChinh: rawImg,
+            tongMauSac: p.tongMauSac || 'Tông Hồng Pastel',
+          });
+        }
+      }
+
+      try {
+        await api.put(`/SanPham/${p.maSanPham}`, {
+          maSanPham: p.maSanPham,
+          tenSanPham: p.tenSanPham,
+          maDanhMuc: p.maDanhMuc || 1,
+          giaBan: p.giaBan,
+          soLuongTon: p.soLuongTon ?? 20,
+          tongMauSac: p.tongMauSac || 'Tông Hồng Pastel',
+          moTa: p.moTa || '',
+          hinhAnhChinh: '',
+          hinhAnh: '',
+          trangThai: p.trangThai ?? true,
+        });
+      } catch {
+        // Bỏ qua nếu sản phẩm không sửa được
+      }
+    }
+    return true;
+  }, []);
+
+  // Cơ chế tải dự phòng các đơn gần nhất theo mã đơn nếu danh sách tổng /DonHang quá tải
+  const loadRecentOrdersFallback = useCallback(async () => {
+    const metaKeys = Object.keys(readLocalOrderMeta())
+      .map((k) => Number(k))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const maxKnownId = metaKeys.length > 0 ? Math.max(...metaKeys) : 770;
+    const startId = Math.max(maxKnownId + 5, 770);
+
+    const candidateIds = [];
+    for (let id = startId; id >= Math.max(1, startId - 35); id -= 1) {
+      candidateIds.push(id);
+    }
+
+    const results = await Promise.allSettled(
+      candidateIds.map((id) => api.get(`/DonHang/${id}`, { timeout: 5000 }))
+    );
+
+    const recovered = [];
+    results.forEach((r) => {
+      if (r.status === 'fulfilled' && r.value?.data?.maDonHang) {
+        recovered.push(r.value.data);
+      }
+    });
+
+    recovered.sort((a, b) => (b.maDonHang || 0) - (a.maDonHang || 0));
+    return recovered;
+  }, []);
+
+  const loadOrdersOnly = useCallback(async () => {
+    setLoadingOrders(true);
+    try {
+      const res = await api.get('/DonHang', { timeout: 25000 });
+      setApiError('');
+      const d = res.data;
+      let ordList = Array.isArray(d) ? d : d?.items || d?.data || [];
+      ordList.sort((a, b) => (b.maDonHang || 0) - (a.maDonHang || 0));
+
+      const topEnriched = await Promise.all(
+        ordList.slice(0, 5).map(async (ord) => {
+          const hasStatus =
+            ord.trangThai || ord.trangThaiDonHang || ord.trangThaiDon || ord.status;
+          if (hasStatus) return ord;
+          try {
+            const dRes = await api.get(`/DonHang/${ord.maDonHang}`, { timeout: 4000 });
+            return { ...ord, ...(dRes.data || {}) };
+          } catch {
+            return ord;
+          }
+        })
+      );
+      ordList = [...topEnriched, ...ordList.slice(5)];
+      setOrders(ordList);
+
+      try {
+        const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
+        localStorage.setItem(
+          'thx_admin_fast_cache',
+          JSON.stringify({ ...prevCache, orders: ordList.slice(0, 150) })
+        );
+      } catch {
+        // Bỏ qua
+      }
+      return true;
+    } catch (err) {
+      const status = err?.response?.status;
+      if (status === 401 || status === 403) {
+        setApiError(
+          'Phiên đăng nhập Admin đã hết hạn. Vui lòng bấm Đăng xuất ở góc phải và đăng nhập lại.'
+        );
+        return false;
+      }
+
+      // Thử nạp dự phòng các đơn hàng gần nhất theo ID
+      const fallbackList = await loadRecentOrdersFallback();
+      if (fallbackList.length > 0) {
+        setOrders(fallbackList);
+        setApiError(
+          `Đang hiển thị ${fallbackList.length} đơn hàng mới nhất (Danh sách tổng đang quá tải, hãy bấm "Xóa đơn cũ" nếu cần).`
+        );
+        return true;
+      }
+
+      const reasonText = status ? `HTTP ${status}` : err?.message || 'Timeout';
+      setApiError(
+        `Chưa tải được danh sách đơn hàng từ máy chủ (${reasonText}). Vui lòng bấm "Thử kết nối lại".`
+      );
+      return false;
+    } finally {
+      setLoadingOrders(false);
+    }
+  }, [loadRecentOrdersFallback]);
+
   const loadAllData = useCallback(async () => {
     setLoading(true);
-    setLoadingOrders(true);
     setApiError('');
 
-    // 1. Nạp ngay dữ liệu lưu tạm gần nhất để màn hình hiển thị tức thì
+    // 1. Nạp ngay dữ liệu lưu tạm gần nhất để màn hình không bị trống
     try {
       const rawCache = localStorage.getItem('thx_admin_fast_cache');
       if (rawCache) {
@@ -431,7 +574,7 @@ export default function AdminDashboard() {
         }
       }
     } catch {
-      // Bỏ qua lỗi đọc cache
+      // Bỏ qua
     }
 
     // 2. Đồng bộ đám mây chạy nền
@@ -440,10 +583,10 @@ export default function AdminDashboard() {
       setProducts((prev) => [...prev]);
     });
 
-    // 3. Tải danh sách sản phẩm
+    // 3. Tải sản phẩm trước và tự dọn ảnh base64 nặng khỏi SQL Server nếu có
     api
       .get('/SanPham', { timeout: 12000 })
-      .then((res) => {
+      .then(async (res) => {
         const d = res.data;
         const spList = Array.isArray(d) ? d : d?.items || [];
         setProducts(spList);
@@ -463,69 +606,18 @@ export default function AdminDashboard() {
         } catch {
           // Bỏ qua
         }
+
+        const cleanedHeavySql = await stripHeavyBase64FromSql(spList);
+        if (cleanedHeavySql) {
+          // Gọi lại /DonHang sau khi đã làm sạch chuỗi ảnh nặng trong SQL Server
+          loadOrdersOnly();
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
 
-    // 4. Tải danh sách đơn hàng với thời gian chờ 25s (vì có nhiều đơn lịch sử)
-    const fetchOrdersWithRetry = async () => {
-      try {
-        return await api.get('/DonHang', { timeout: 25000 });
-      } catch (firstErr) {
-        if (firstErr?.response?.status === 401 || firstErr?.response?.status === 403) {
-          throw firstErr;
-        }
-        await new Promise((r) => setTimeout(r, 1200));
-        return await api.get('/DonHang', { timeout: 25000 });
-      }
-    };
-
-    fetchOrdersWithRetry()
-      .then(async (res) => {
-        setApiError('');
-        const d = res.data;
-        let ordList = Array.isArray(d) ? d : d?.items || [];
-        ordList.sort((a, b) => (b.maDonHang || 0) - (a.maDonHang || 0));
-
-        const topEnriched = await Promise.all(
-          ordList.slice(0, 5).map(async (ord) => {
-            const hasStatus =
-              ord.trangThai || ord.trangThaiDonHang || ord.trangThaiDon || ord.status;
-            if (hasStatus) return ord;
-            try {
-              const dRes = await api.get(`/DonHang/${ord.maDonHang}`, { timeout: 4000 });
-              return { ...ord, ...(dRes.data || {}) };
-            } catch {
-              return ord;
-            }
-          })
-        );
-        ordList = [...topEnriched, ...ordList.slice(5)];
-        setOrders(ordList);
-
-        try {
-          const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
-          localStorage.setItem(
-            'thx_admin_fast_cache',
-            JSON.stringify({ ...prevCache, orders: ordList.slice(0, 150) })
-          );
-        } catch {
-          // Bỏ qua
-        }
-      })
-      .catch((err) => {
-        const status = err?.response?.status;
-        if (status === 401 || status === 403) {
-          setApiError(
-            'Phiên đăng nhập Admin đã hết hạn. Vui lòng bấm Đăng xuất ở góc phải và đăng nhập lại.'
-          );
-        } else {
-          setApiError(
-            'Máy chủ Backend đang tải nhiều đơn hàng lịch sử nên phản hồi chậm. Bạn có thể bấm "Thử kết nối lại" hoặc xóa bớt đơn mẫu cũ.'
-          );
-        }
-      })
-      .finally(() => setLoadingOrders(false));
+    // 4. Tải danh sách đơn hàng
+    loadOrdersOnly();
 
     // 5. Tải dự báo AI độc lập
     api
@@ -555,7 +647,7 @@ export default function AdminDashboard() {
           }));
         }
       });
-  }, [buildFallbackForecast]);
+  }, [buildFallbackForecast, stripHeavyBase64FromSql, loadOrdersOnly]);
 
   useEffect(() => {
     loadAllData();
@@ -625,7 +717,6 @@ export default function AdminDashboard() {
 
     try {
       setDeletingOrders(true);
-      // Xóa theo từng nhóm 10 đơn trên máy chủ SQL Server
       const chunkSize = 10;
       for (let i = 0; i < idsToDelete.length; i += chunkSize) {
         const chunk = idsToDelete.slice(i, i + chunkSize);
@@ -914,6 +1005,7 @@ export default function AdminDashboard() {
     const cleanName = productForm.tenSanPham.trim();
     const cleanTone = productForm.tongMauSac.trim() || 'Tông Hồng Pastel';
     const cleanImg = (productForm.hinhAnhChinh || '').trim();
+    const isBase64Upload = cleanImg.startsWith('data:image/');
 
     if (!cleanName) {
       showToast('Vui lòng nhập tên bó hoa.', 'error');
@@ -922,57 +1014,31 @@ export default function AdminDashboard() {
 
     try {
       setSavingProduct(true);
-      const basePayload = {
+      // Không gửi chuỗi base64 vào SQL Server để giữ API /DonHang luôn nhẹ; ảnh lưu qua cloud override
+      const sqlPayload = {
         tenSanPham: cleanName,
         maDanhMuc: Number(productForm.maDanhMuc),
         giaBan: Number(productForm.giaBan),
         soLuongTon: Number(productForm.soLuongTon),
         tongMauSac: cleanTone,
         moTa: productForm.moTa.trim(),
-        hinhAnhChinh: cleanImg,
-        hinhAnh: cleanImg,
+        hinhAnhChinh: isBase64Upload ? '' : cleanImg,
+        hinhAnh: isBase64Upload ? '' : cleanImg,
         trangThai: true,
       };
 
       let savedData = null;
 
       if (productModal.mode === 'create') {
-        try {
-          const res = await api.post('/SanPham', basePayload);
-          savedData = res.data;
-        } catch (err) {
-          if (cleanImg.startsWith('data:image/')) {
-            const fallbackRes = await api.post('/SanPham', {
-              ...basePayload,
-              hinhAnhChinh: '',
-              hinhAnh: '',
-            });
-            savedData = fallbackRes.data;
-          } else {
-            throw err;
-          }
-        }
+        const res = await api.post('/SanPham', sqlPayload);
+        savedData = res.data;
         showToast(`Đã thêm mẫu hoa "${cleanName}" thành công!`);
       } else {
-        const updatePayload = {
-          ...basePayload,
+        const res = await api.put(`/SanPham/${productModal.id}`, {
+          ...sqlPayload,
           maSanPham: productModal.id,
-        };
-        try {
-          const res = await api.put(`/SanPham/${productModal.id}`, updatePayload);
-          savedData = res.data;
-        } catch (err) {
-          if (cleanImg.startsWith('data:image/')) {
-            const fallbackRes = await api.put(`/SanPham/${productModal.id}`, {
-              ...updatePayload,
-              hinhAnhChinh: '',
-              hinhAnh: '',
-            });
-            savedData = fallbackRes.data;
-          } else {
-            throw err;
-          }
-        }
+        });
+        savedData = res.data;
         showToast(`Đã cập nhật & đồng bộ bó hoa "${cleanName}"!`);
       }
 
@@ -1034,10 +1100,8 @@ export default function AdminDashboard() {
     return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Loại bỏ các đơn đã bị Admin xóa
   const activeOrders = orders.filter((o) => !orderMetaMap[o.maDonHang]?.deleted);
 
-  // Chỉ tính doanh thu các đơn hoàn tất trong tháng được chọn
   const monthlyCompletedOrders = activeOrders.filter((o) => {
     const meta = orderMetaMap[o.maDonHang] || {};
     const st = normalizeAdminOrderStatus(extractRawStatus(o, meta));
