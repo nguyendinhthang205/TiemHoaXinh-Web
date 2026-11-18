@@ -46,6 +46,7 @@ import {
   getAllConversationsForAdmin,
   sendAdminReply,
   markConversationReadByAdmin,
+  syncChatsFromCloud,
 } from '../../services/chatService';
 
 const PAGE_SIZE = 15;
@@ -212,6 +213,7 @@ export default function AdminDashboard() {
   const [conversations, setConversations] = useState([]);
   const [selectedConvId, setSelectedConvId] = useState(null);
   const [adminReplyText, setAdminReplyText] = useState('');
+  const [sendingReply, setSendingReply] = useState(false);
   const adminChatEndRef = useRef(null);
 
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -248,6 +250,8 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     syncChats();
+    syncChatsFromCloud().then(() => syncChats());
+
     const handleChatEvent = () => syncChats();
     window.addEventListener('thx_chat_updated', handleChatEvent);
     window.addEventListener('storage', handleChatEvent);
@@ -257,14 +261,33 @@ export default function AdminDashboard() {
     };
   }, [syncChats]);
 
+  // Tự động đồng bộ tin nhắn mới từ khách hàng (điện thoại / trình duyệt khác)
   useEffect(() => {
-    if (activeTab === 'messages' && selectedConvId) {
-      markConversationReadByAdmin(selectedConvId);
+    const intervalMs = activeTab === 'messages' ? 3000 : 6000;
+    const timer = setInterval(() => {
+      syncChatsFromCloud().then(() => syncChats());
+    }, intervalMs);
+    return () => clearInterval(timer);
+  }, [activeTab, syncChats]);
+
+  const activeConversation =
+    conversations.find((c) => c.id === selectedConvId) || conversations[0] || null;
+
+  useEffect(() => {
+    if (activeTab === 'messages' && activeConversation?.id) {
+      if ((activeConversation.unreadByAdmin || 0) > 0) {
+        markConversationReadByAdmin(activeConversation.id);
+      }
       setTimeout(() => {
         adminChatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 60);
     }
-  }, [activeTab, selectedConvId, conversations.length]);
+  }, [
+    activeTab,
+    activeConversation?.id,
+    activeConversation?.messages?.length,
+    activeConversation?.unreadByAdmin,
+  ]);
 
   const readLocalMeta = () => {
     try {
@@ -350,7 +373,7 @@ export default function AdminDashboard() {
         const reason = spResult.reason || ordResult.reason;
         if (!reason?.response) {
           setApiError(
-            `Không thể kết nối tới máy chủ Backend (${API_BASE_URL}). Hãy kiểm tra Visual Studio đã chạy (Ctrl + F5) và mở tab https://localhost:44320/swagger để chấp nhận chứng chỉ bảo mật.`
+            `Không thể kết nối tới máy chủ Backend (${API_BASE_URL}). Hãy kiểm tra máy chủ đang hoạt động và thử tải lại.`
           );
         } else {
           setApiError(
@@ -611,12 +634,21 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleSendAdminReply = (replyText) => {
+  const handleSendAdminReply = async (replyText) => {
     const content = typeof replyText === 'string' ? replyText : adminReplyText;
-    if (!content.trim() || !selectedConvId) return;
-    sendAdminReply(selectedConvId, content);
-    setAdminReplyText('');
-    syncChats();
+    const targetConvId = activeConversation?.id || selectedConvId;
+    if (!content.trim() || !targetConvId || sendingReply) return;
+
+    setSendingReply(true);
+    if (typeof replyText !== 'string') {
+      setAdminReplyText('');
+    }
+    try {
+      await sendAdminReply(targetConvId, content);
+      syncChats();
+    } finally {
+      setSendingReply(false);
+    }
   };
 
   const openCreateProduct = () => {
@@ -816,9 +848,6 @@ export default function AdminDashboard() {
     0
   );
 
-  const activeConversation =
-    conversations.find((c) => c.id === selectedConvId) || conversations[0] || null;
-
   const filteredOrders = orders.filter((o) => {
     const address = String(o.diaChiGiao || o.diaChi || '');
     const meta = orderMetaMap[o.maDonHang] || {};
@@ -899,7 +928,7 @@ export default function AdminDashboard() {
             type="button"
             onClick={() => {
               loadAllData();
-              syncChats();
+              syncChatsFromCloud().then(() => syncChats());
             }}
             disabled={loading}
             className="btn btn-outline"
@@ -1162,7 +1191,10 @@ export default function AdminDashboard() {
 
         <button
           type="button"
-          onClick={() => setActiveTab('messages')}
+          onClick={() => {
+            setActiveTab('messages');
+            syncChatsFromCloud().then(() => syncChats());
+          }}
           className={activeTab === 'messages' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}
           style={{ position: 'relative' }}
         >
@@ -1719,7 +1751,7 @@ export default function AdminDashboard() {
                           borderRadius: 999,
                         }}
                       >
-                        Đang kết nối trực tuyến
+                        Đang đồng bộ trực tuyến
                       </span>
                     </div>
 
@@ -1786,6 +1818,7 @@ export default function AdminDashboard() {
                         <button
                           key={tpl}
                           type="button"
+                          disabled={sendingReply}
                           onClick={() => handleSendAdminReply(tpl)}
                           style={{
                             fontSize: '0.75rem',
@@ -1821,9 +1854,14 @@ export default function AdminDashboard() {
                         value={adminReplyText}
                         onChange={(e) => setAdminReplyText(e.target.value)}
                       />
-                      <button type="submit" className="btn btn-primary" style={{ whiteSpace: 'nowrap' }}>
+                      <button
+                        type="submit"
+                        disabled={sendingReply}
+                        className="btn btn-primary"
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
                         <Send size={16} />
-                        <span>Gửi phản hồi</span>
+                        <span>{sendingReply ? 'Đang gửi...' : 'Gửi phản hồi'}</span>
                       </button>
                     </form>
                   </>

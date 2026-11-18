@@ -7,6 +7,7 @@ import {
   ensureCustomerConversation,
   sendCustomerMessage,
   markConversationReadByCustomer,
+  syncChatsFromCloud,
 } from '../services/chatService';
 
 export default function CustomerChatWidget() {
@@ -18,6 +19,7 @@ export default function CustomerChatWidget() {
   const [hotline, setHotline] = useState(() => getHotlineNumber());
   const [inputText, setInputText] = useState('');
   const [messages, setMessages] = useState([]);
+  const [sending, setSending] = useState(false);
   const messagesEndRef = useRef(null);
 
   const isAdminPage = location.pathname.startsWith('/admin');
@@ -33,11 +35,15 @@ export default function CustomerChatWidget() {
 
   useEffect(() => {
     loadConversationMessages();
+    syncChatsFromCloud().then(() => loadConversationMessages());
 
     const handleOpenChat = () => {
       setIsOpen(true);
       loadConversationMessages();
-      markConversationReadByCustomer(user);
+      syncChatsFromCloud().then(() => {
+        loadConversationMessages();
+        markConversationReadByCustomer(user);
+      });
     };
     const handleSyncChat = () => loadConversationMessages();
     const handleSyncHotline = () => setHotline(getHotlineNumber());
@@ -57,27 +63,42 @@ export default function CustomerChatWidget() {
     };
   }, [loadConversationMessages, user]);
 
+  // Tự động đồng bộ tin nhắn mới từ Admin mỗi 3 giây khi khách đang mở khung chat
+  useEffect(() => {
+    if (!isOpen || isAdminPage) return undefined;
+    const timer = setInterval(() => {
+      syncChatsFromCloud().then(() => {
+        loadConversationMessages();
+        markConversationReadByCustomer(user);
+      });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [isOpen, isAdminPage, loadConversationMessages, user]);
+
   useEffect(() => {
     if (isOpen) {
-      markConversationReadByCustomer(user);
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 60);
     }
-  }, [isOpen, messages.length, user]);
+  }, [isOpen, messages.length]);
 
-  const handleSendMessage = (e) => {
+  const handleSendMessage = async (e) => {
     if (e) e.preventDefault();
     const text = inputText.trim();
-    if (!text) return;
+    if (!text || sending) return;
 
-    const updatedConv = sendCustomerMessage(user, text);
+    setSending(true);
     setInputText('');
-
-    if (updatedConv && Array.isArray(updatedConv.messages)) {
-      setMessages(updatedConv.messages);
-    } else {
-      loadConversationMessages();
+    try {
+      const updatedConv = await sendCustomerMessage(user, text);
+      if (updatedConv && Array.isArray(updatedConv.messages)) {
+        setMessages(updatedConv.messages);
+      } else {
+        loadConversationMessages();
+      }
+    } finally {
+      setSending(false);
     }
   };
 
@@ -259,6 +280,7 @@ export default function CustomerChatWidget() {
             <button
               type="button"
               onClick={handleSendMessage}
+              disabled={sending}
               className="btn btn-primary btn-sm"
               style={{ height: 38, padding: '0 14px' }}
             >
