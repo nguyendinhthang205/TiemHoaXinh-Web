@@ -1,0 +1,394 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
+import { PhoneCall, MessageCircle, X, Send } from 'lucide-react';
+import { useApp } from '../context/AppContext';
+import { getHotlineNumber } from '../services/api';
+import * as chatService from '../services/chatService';
+
+const CHAT_STORAGE_KEY = 'thx_chat_conversations';
+
+export default function CustomerChatWidget() {
+  const location = useLocation();
+  const appCtx = useApp() || {};
+  const { user } = appCtx;
+
+  const [isOpen, setIsOpen] = useState(false);
+  const [hotline, setHotline] = useState(() => getHotlineNumber());
+  const [inputText, setInputText] = useState('');
+  const [messages, setMessages] = useState([]);
+  const messagesEndRef = useRef(null);
+
+  const isAdminPage = location.pathname.startsWith('/admin');
+
+  const getCustomerIdentity = useCallback(() => {
+    const email = user?.email || 'khach.vang.lai@tiemhoaxinh.vn';
+    const name = user?.hoTen || 'Khách hàng Tiệm Hoa Xinh';
+    const phone = user?.soDienThoai || '';
+    const convId = user?.maNguoiDung ? `user_${user.maNguoiDung}` : `guest_${email}`;
+    return { convId, name, email, phone };
+  }, [user]);
+
+  const loadConversationMessages = useCallback(() => {
+    const { convId, email } = getCustomerIdentity();
+    try {
+      if (typeof chatService.getAllConversationsForAdmin === 'function') {
+        const all = chatService.getAllConversationsForAdmin() || [];
+        const found = all.find((c) => c.id === convId || c.customerEmail === email);
+        if (found && Array.isArray(found.messages)) {
+          setMessages(found.messages);
+          return;
+        }
+      }
+      const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(parsed) ? parsed : Object.values(parsed || {});
+      const found = list.find((c) => c.id === convId || c.customerEmail === email);
+      setMessages(found?.messages || []);
+    } catch {
+      setMessages([]);
+    }
+  }, [getCustomerIdentity]);
+
+  useEffect(() => {
+    loadConversationMessages();
+
+    const handleOpenChat = () => {
+      setIsOpen(true);
+      loadConversationMessages();
+    };
+    const handleSyncChat = () => loadConversationMessages();
+    const handleSyncHotline = () => setHotline(getHotlineNumber());
+
+    window.addEventListener('thx_open_customer_chat', handleOpenChat);
+    window.addEventListener('thx_chat_updated', handleSyncChat);
+    window.addEventListener('storage', handleSyncChat);
+    window.addEventListener('thx_hotline_updated', handleSyncHotline);
+    window.addEventListener('storage', handleSyncHotline);
+
+    return () => {
+      window.removeEventListener('thx_open_customer_chat', handleOpenChat);
+      window.removeEventListener('thx_chat_updated', handleSyncChat);
+      window.removeEventListener('storage', handleSyncChat);
+      window.removeEventListener('thx_hotline_updated', handleSyncHotline);
+      window.removeEventListener('storage', handleSyncHotline);
+    };
+  }, [loadConversationMessages]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 60);
+    }
+  }, [isOpen, messages.length]);
+
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    const text = inputText.trim();
+    if (!text) return;
+
+    const { convId, name, email, phone } = getCustomerIdentity();
+    const nowIso = new Date().toISOString();
+
+    if (typeof chatService.sendCustomerMessage === 'function') {
+      chatService.sendCustomerMessage({
+        conversationId: convId,
+        customerName: name,
+        customerEmail: email,
+        customerPhone: phone,
+        text,
+      });
+    } else {
+      try {
+        const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        const list = Array.isArray(parsed) ? parsed : Object.values(parsed || {});
+        const idx = list.findIndex((c) => c.id === convId || c.customerEmail === email);
+        const newMsg = {
+          id: `msg_${Date.now()}`,
+          sender: 'customer',
+          text,
+          createdAt: nowIso,
+        };
+
+        if (idx >= 0) {
+          list[idx] = {
+            ...list[idx],
+            customerName: name,
+            customerEmail: email,
+            customerPhone: phone || list[idx].customerPhone,
+            updatedAt: nowIso,
+            unreadByAdmin: (list[idx].unreadByAdmin || 0) + 1,
+            messages: [...(list[idx].messages || []), newMsg],
+          };
+        } else {
+          list.unshift({
+            id: convId,
+            customerName: name,
+            customerEmail: email,
+            customerPhone: phone,
+            updatedAt: nowIso,
+            unreadByAdmin: 1,
+            messages: [newMsg],
+          });
+        }
+        localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(list));
+      } catch {
+        // Bỏ qua nếu bộ nhớ đầy
+      }
+    }
+
+    setInputText('');
+    window.dispatchEvent(new Event('thx_chat_updated'));
+    window.dispatchEvent(new Event('storage'));
+    loadConversationMessages();
+  };
+
+  if (isAdminPage) return null;
+
+  return (
+    <>
+      <style>{`
+        @keyframes thxRainbowBlink {
+          0% {
+            background-color: #e11d48;
+            box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.7), 0 10px 24px rgba(225, 29, 72, 0.45);
+            transform: scale(1);
+          }
+          20% {
+            background-color: #f97316;
+            box-shadow: 0 0 0 8px rgba(249, 115, 22, 0), 0 10px 26px rgba(249, 115, 22, 0.5);
+            transform: scale(1.04);
+          }
+          40% {
+            background-color: #eab308;
+            box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.7), 0 10px 24px rgba(234, 179, 8, 0.45);
+            transform: scale(1);
+          }
+          60% {
+            background-color: #10b981;
+            box-shadow: 0 0 0 8px rgba(16, 185, 129, 0), 0 10px 26px rgba(16, 185, 129, 0.5);
+            transform: scale(1.04);
+          }
+          80% {
+            background-color: #2563eb;
+            box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7), 0 10px 24px rgba(37, 99, 235, 0.45);
+            transform: scale(1);
+          }
+          100% {
+            background-color: #9333ea;
+            box-shadow: 0 0 0 8px rgba(147, 51, 234, 0), 0 10px 26px rgba(147, 51, 234, 0.5);
+            transform: scale(1.04);
+          }
+        }
+        @keyframes thxPhoneShake {
+          0%, 100% { transform: rotate(0deg); }
+          15% { transform: rotate(-18deg); }
+          30% { transform: rotate(18deg); }
+          45% { transform: rotate(-14deg); }
+          60% { transform: rotate(14deg); }
+          75% { transform: rotate(-8deg); }
+        }
+      `}</style>
+
+      {/* Khung hộp thoại nhắn tin trực tiếp với Admin (Mở khi bấm "Nhắn với Admin" hoặc "Nhắn tin Admin") */}
+      {isOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            right: 22,
+            bottom: 94,
+            width: 350,
+            maxWidth: 'calc(100vw - 32px)',
+            background: '#ffffff',
+            borderRadius: 20,
+            boxShadow: '0 20px 50px rgba(15, 23, 42, 0.22)',
+            border: '1px solid #fecdd3',
+            overflow: 'hidden',
+            zIndex: 95,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
+              color: '#ffffff',
+              padding: '14px 16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+              <MessageCircle size={20} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>
+                  Tư Vấn Trực Tuyến Tiệm Hoa Xinh
+                </div>
+                <div style={{ fontSize: '0.75rem', opacity: 0.9 }}>
+                  Thợ hoa &amp; Admin sẵn sàng hỗ trợ
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              title="Đóng hộp thoại"
+              style={{
+                background: 'rgba(255, 255, 255, 0.2)',
+                border: 'none',
+                color: '#ffffff',
+                width: 30,
+                height: 30,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div
+            style={{
+              height: 280,
+              overflowY: 'auto',
+              padding: 14,
+              background: '#fffafb',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
+            <div
+              style={{
+                background: '#ffffff',
+                border: '1px solid #fce7f3',
+                padding: '9px 12px',
+                borderRadius: '14px 14px 14px 4px',
+                fontSize: '0.84rem',
+                color: '#374151',
+                maxWidth: '85%',
+              }}
+            >
+              Xin chào! Bạn cần tư vấn mẫu hoa sinh nhật, khai trương hay đặt thiết kế riêng theo yêu cầu ạ?
+            </div>
+
+            {messages.map((m) => {
+              const isCustomer = m.sender === 'customer';
+              return (
+                <div
+                  key={m.id}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: isCustomer ? 'flex-end' : 'flex-start',
+                  }}
+                >
+                  <div
+                    style={{
+                      background: isCustomer ? '#e11d48' : '#ffffff',
+                      color: isCustomer ? '#ffffff' : '#1f2937',
+                      border: isCustomer ? 'none' : '1px solid #e5e7eb',
+                      padding: '9px 13px',
+                      borderRadius: isCustomer
+                        ? '14px 14px 4px 14px'
+                        : '14px 14px 14px 4px',
+                      fontSize: '0.86rem',
+                      maxWidth: '82%',
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    {m.text}
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={messagesEndRef} />
+          </div>
+
+          <form
+            onSubmit={handleSendMessage}
+            style={{
+              padding: '10px 12px',
+              borderTop: '1px solid #f3f4f6',
+              display: 'flex',
+              gap: 8,
+              background: '#ffffff',
+            }}
+          >
+            <input
+              type="text"
+              className="form-control"
+              placeholder="Nhập tin nhắn gửi Admin..."
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              style={{ height: 38, fontSize: '0.86rem' }}
+            />
+            <button
+              type="submit"
+              className="btn btn-primary btn-sm"
+              style={{ height: 38, padding: '0 14px' }}
+            >
+              <Send size={15} />
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* Nút Hotline gọi nhanh nhấp nháy nhiều màu ở góc dưới bên phải */}
+      <a
+        href={`tel:${String(hotline).replace(/[^0-9+]/g, '')}`}
+        title={`Gọi ngay Hotline ${hotline} để được tư vấn chọn hoa miễn phí`}
+        style={{
+          position: 'fixed',
+          right: 22,
+          bottom: 22,
+          zIndex: 90,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 11,
+          padding: '10px 18px',
+          borderRadius: 999,
+          color: '#ffffff',
+          textDecoration: 'none',
+          border: '2px solid rgba(255, 255, 255, 0.85)',
+          animation: 'thxRainbowBlink 2.4s infinite ease-in-out',
+          cursor: 'pointer',
+        }}
+      >
+        <span
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: '50%',
+            background: 'rgba(255, 255, 255, 0.24)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            animation: 'thxPhoneShake 1.2s infinite ease-in-out',
+          }}
+        >
+          <PhoneCall size={18} />
+        </span>
+        <div style={{ lineHeight: 1.2 }}>
+          <div
+            style={{
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              opacity: 0.95,
+              letterSpacing: '0.04em',
+            }}
+          >
+            HOTLINE TƯ VẤN NGAY
+          </div>
+          <div style={{ fontSize: '1rem', fontWeight: 800 }}>{hotline}</div>
+        </div>
+      </a>
+    </>
+  );
+}
