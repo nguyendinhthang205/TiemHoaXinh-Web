@@ -6,6 +6,8 @@ import {
   MessageCircle,
   Heart,
   ShoppingCart,
+  LayoutDashboard,
+  Settings,
 } from 'lucide-react';
 import api, { formatVND, getFlowerImage } from '../services/api';
 import { useApp } from '../context/AppContext';
@@ -40,9 +42,14 @@ const FEATURED_CATEGORIES = [
 
 export default function HomePage() {
   const appCtx = useApp() || {};
-  const { addToCart } = appCtx;
+  const { addToCart, user } = appCtx;
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const isAdmin =
+    String(user?.vaiTro || user?.role || '').toLowerCase() === 'admin' ||
+    String(user?.email || '').toLowerCase().includes('admin') ||
+    String(user?.hoTen || '').trim().toLowerCase() === 'admin';
 
   const loadProducts = useCallback(async () => {
     try {
@@ -119,7 +126,11 @@ export default function HomePage() {
               }}
             >
               <Sparkles size={14} />
-              <span>Bộ Sưu Tập Hoa Tươi 2026 &bull; Tích hợp AI Gợi Ý</span>
+              <span>
+                {isAdmin
+                  ? 'Chế Độ Quản Trị Viên • Tiệm Hoa Xinh 2026'
+                  : 'Bộ Sưu Tập Hoa Tươi 2026 • Tích hợp AI Gợi Ý'}
+              </span>
             </div>
 
             <h1
@@ -146,47 +157,86 @@ export default function HomePage() {
                 marginBottom: 28,
               }}
             >
-              Những thiết kế hoa bó, giỏ hoa nghệ thuật được tuyển chọn tỉ mỉ mỗi ngày.
-              Bấm vào bất kỳ mẫu hoa nào để xem hệ thống AI gợi ý các bó hoa đồng điệu nhất.
+              {isAdmin
+                ? 'Theo dõi nhanh danh mục hoa đang mở bán trên cửa hàng hoặc truy cập Bảng điều khiển để xử lý đơn hàng, phản hồi khách và xem dự báo nhập hàng AI.'
+                : 'Những thiết kế hoa bó, giỏ hoa nghệ thuật được tuyển chọn tỉ mỉ mỗi ngày. Bấm vào bất kỳ mẫu hoa nào để xem hệ thống AI gợi ý các bó hoa đồng điệu nhất.'}
             </p>
 
-            {/* 2 Nút thao tác chính: Khám phá cửa hàng & Nhắn với Admin */}
-            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 36 }}>
-              <Link
-                to="/shop"
-                className="btn btn-primary"
-                style={{
-                  padding: '12px 24px',
-                  fontSize: '0.96rem',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 8,
-                }}
-              >
-                <span>Khám phá cửa hàng</span>
-                <ArrowRight size={18} />
-              </Link>
+            {/* Nút thao tác phân tách rõ ràng giữa Admin và Khách hàng */}
+            {isAdmin ? (
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 36 }}>
+                <Link
+                  to="/admin"
+                  className="btn btn-primary"
+                  style={{
+                    padding: '12px 24px',
+                    fontSize: '0.96rem',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <LayoutDashboard size={18} />
+                  <span>Vào Bảng Điều Khiển Quản Trị</span>
+                </Link>
 
-              <button
-                type="button"
-                onClick={handleOpenChat}
-                className="btn btn-outline"
-                style={{
-                  padding: '12px 22px',
-                  fontSize: '0.96rem',
-                  background: '#ffffff',
-                  borderColor: '#fecdd3',
-                  color: '#be123c',
-                  fontWeight: 700,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 8,
-                }}
-              >
-                <MessageCircle size={18} />
-                <span>Nhắn với Admin</span>
-              </button>
-            </div>
+                <Link
+                  to="/shop"
+                  className="btn btn-outline"
+                  style={{
+                    padding: '12px 22px',
+                    fontSize: '0.96rem',
+                    background: '#ffffff',
+                    borderColor: '#fecdd3',
+                    color: '#be123c',
+                    fontWeight: 700,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <span>Xem giao diện Cửa hàng</span>
+                  <ArrowRight size={18} />
+                </Link>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 36 }}>
+                <Link
+                  to="/shop"
+                  className="btn btn-primary"
+                  style={{
+                    padding: '12px 24px',
+                    fontSize: '0.96rem',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <span>Khám phá cửa hàng</span>
+                  <ArrowRight size={18} />
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={handleOpenChat}
+                  className="btn btn-outline"
+                  style={{
+                    padding: '12px 22px',
+                    fontSize: '0.96rem',
+                    background: '#ffffff',
+                    borderColor: '#fecdd3',
+                    color: '#be123c',
+                    fontWeight: 700,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <MessageCircle size={18} />
+                  <span>Nhắn với Admin</span>
+                </button>
+              </div>
+            )}
 
             {/* 3 Chỉ số nổi bật */}
             <div
@@ -483,15 +533,22 @@ export default function HomePage() {
                     {formatVND(sp.giaBan)}
                   </span>
 
-                  <button
-                    type="button"
-                    onClick={() => handleQuickAdd(sp)}
-                    className="btn btn-primary btn-sm"
-                    disabled={sp.soLuongTon === 0}
-                  >
-                    <ShoppingCart size={14} />
-                    <span>Thêm</span>
-                  </button>
+                  {isAdmin ? (
+                    <Link to="/admin" className="btn btn-outline btn-sm">
+                      <Settings size={14} />
+                      <span>Quản lý</span>
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleQuickAdd(sp)}
+                      className="btn btn-primary btn-sm"
+                      disabled={sp.soLuongTon === 0}
+                    >
+                      <ShoppingCart size={14} />
+                      <span>Thêm</span>
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

@@ -23,17 +23,26 @@ export default function CustomerChatWidget() {
   const messagesEndRef = useRef(null);
 
   const isAdminPage = location.pathname.startsWith('/admin');
+  const isAdminUser =
+    String(user?.vaiTro || user?.role || '').toLowerCase() === 'admin' ||
+    String(user?.email || '').toLowerCase().includes('admin') ||
+    String(user?.hoTen || '').trim().toLowerCase() === 'admin';
+
+  const isHidden = isAdminPage || isAdminUser;
 
   const loadConversationMessages = useCallback(() => {
+    if (isHidden) return;
     try {
       const conv = ensureCustomerConversation(user);
       setMessages(Array.isArray(conv?.messages) ? conv.messages : []);
     } catch {
       setMessages([]);
     }
-  }, [user]);
+  }, [user, isHidden]);
 
   useEffect(() => {
+    if (isHidden) return undefined;
+
     loadConversationMessages();
     syncChatsFromCloud().then(() => loadConversationMessages());
 
@@ -61,11 +70,11 @@ export default function CustomerChatWidget() {
       window.removeEventListener('thx_hotline_updated', handleSyncHotline);
       window.removeEventListener('storage', handleSyncHotline);
     };
-  }, [loadConversationMessages, user]);
+  }, [loadConversationMessages, user, isHidden]);
 
   // Tự động đồng bộ tin nhắn mới từ Admin mỗi 3 giây khi khách đang mở khung chat
   useEffect(() => {
-    if (!isOpen || isAdminPage) return undefined;
+    if (!isOpen || isHidden) return undefined;
     const timer = setInterval(() => {
       syncChatsFromCloud().then(() => {
         loadConversationMessages();
@@ -73,15 +82,15 @@ export default function CustomerChatWidget() {
       });
     }, 3000);
     return () => clearInterval(timer);
-  }, [isOpen, isAdminPage, loadConversationMessages, user]);
+  }, [isOpen, isHidden, loadConversationMessages, user]);
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !isHidden) {
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 60);
     }
-  }, [isOpen, messages.length]);
+  }, [isOpen, isHidden, messages.length]);
 
   const handleSendMessage = async (e) => {
     if (e) e.preventDefault();
@@ -102,7 +111,7 @@ export default function CustomerChatWidget() {
     }
   };
 
-  if (isAdminPage) return null;
+  if (isHidden) return null;
 
   return (
     <>
