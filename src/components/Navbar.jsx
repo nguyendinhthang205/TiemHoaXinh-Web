@@ -6,18 +6,16 @@ import {
   User,
   LogOut,
   LogIn,
-  MessageCircle,
   Menu,
   X,
   ShieldCheck,
   LayoutDashboard,
   Search,
   ChevronDown,
-  Phone,
   ClipboardList,
+  Ticket,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { getHotlineNumber } from '../services/api';
 
 export const STORE_CATEGORY_MENU = [
   {
@@ -85,14 +83,6 @@ export const STORE_CATEGORY_MENU = [
   },
 ];
 
-function formatVietnamPhone(raw) {
-  const digits = String(raw || '').replace(/\D/g, '');
-  if (digits.length === 10) {
-    return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
-  }
-  return String(raw || '').trim();
-}
-
 export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -100,7 +90,6 @@ export default function Navbar() {
   const appCtx = useApp() || {};
   const { user, cartItems = [], logout, setUser } = appCtx;
 
-  const [hotline, setHotline] = useState(() => getHotlineNumber());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [expandedMobileCat, setExpandedMobileCat] = useState('');
@@ -122,16 +111,6 @@ export default function Navbar() {
     : 0;
 
   const activeCat = searchParams.get('cat') || '';
-
-  useEffect(() => {
-    const syncHotline = () => setHotline(getHotlineNumber());
-    window.addEventListener('thx_hotline_updated', syncHotline);
-    window.addEventListener('storage', syncHotline);
-    return () => {
-      window.removeEventListener('thx_hotline_updated', syncHotline);
-      window.removeEventListener('storage', syncHotline);
-    };
-  }, []);
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -189,14 +168,6 @@ export default function Navbar() {
     setMobileMenuOpen(false);
     navigate('/login');
   };
-
-  const openChatBox = () => {
-    setMobileMenuOpen(false);
-    window.dispatchEvent(new Event('thx_open_customer_chat'));
-  };
-
-  const displayPhone = formatVietnamPhone(hotline);
-  const dialHref = `tel:${String(hotline).replace(/[^0-9+]/g, '')}`;
 
   return (
     <>
@@ -424,23 +395,21 @@ export default function Navbar() {
           }
         `}</style>
 
-        {/* 1. Thanh tiện ích trên cùng (Desktop) */}
+        {/* 1. Thanh tiện ích trên cùng (Desktop - đã lược bỏ Hotline & Nhắn tin Admin) */}
         <div className="thx-top-utility">
           <div className="container thx-top-utility-inner">
-            <a
-              href={dialHref}
+            <span
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 6,
                 color: '#be123c',
-                fontWeight: 700,
-                textDecoration: 'none',
+                fontWeight: 600,
               }}
             >
-              <Phone size={13} />
-              <span>HOTLINE: {displayPhone}</span>
-            </a>
+              <Ticket size={14} />
+              <span>Ưu đãi hôm nay: Chọn Voucher giảm đến 50K trực tiếp tại giỏ hàng</span>
+            </span>
 
             <div className="thx-util-links">
               {isAdmin && (
@@ -452,13 +421,6 @@ export default function Navbar() {
                   <LayoutDashboard size={13} />
                   <span>Quản trị &amp; AI Dự báo</span>
                 </Link>
-              )}
-
-              {!isAdmin && (
-                <button type="button" onClick={openChatBox} className="thx-util-item">
-                  <MessageCircle size={13} color="#e11d48" />
-                  <span>Nhắn tin Admin</span>
-                </button>
               )}
 
               {user && !isAdmin && (
@@ -826,7 +788,6 @@ export default function Navbar() {
                 </button>
               </div>
 
-              {/* Danh sách danh mục hoa (có xổ nhánh con) */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {STORE_CATEGORY_MENU.map((cat) => {
                   const isExpanded = expandedMobileCat === cat.id;
@@ -922,86 +883,62 @@ export default function Navbar() {
                 })}
               </div>
 
-              {/* Liên kết đơn hàng & Nhắn tin Admin */}
-              <div
-                style={{
-                  marginTop: 14,
-                  paddingTop: 12,
-                  borderTop: '1px solid #f3f4f6',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 8,
-                }}
-              >
-                {user && !isAdmin && (
-                  <Link
-                    to="/my-orders"
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: 10,
-                      border: '1px solid #e5e7eb',
-                      textDecoration: 'none',
-                      color: '#1f2937',
-                      fontWeight: 600,
-                      fontSize: '0.88rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                    }}
-                  >
-                    <ClipboardList size={16} color="#e11d48" />
-                    <span>Đơn hàng của tôi</span>
-                  </Link>
-                )}
+              {(user || isAdmin) && (
+                <div
+                  style={{
+                    marginTop: 14,
+                    paddingTop: 12,
+                    borderTop: '1px solid #f3f4f6',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}
+                >
+                  {user && !isAdmin && (
+                    <Link
+                      to="/my-orders"
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        border: '1px solid #e5e7eb',
+                        textDecoration: 'none',
+                        color: '#1f2937',
+                        fontWeight: 600,
+                        fontSize: '0.88rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <ClipboardList size={16} color="#e11d48" />
+                      <span>Đơn hàng của tôi</span>
+                    </Link>
+                  )}
 
-                {isAdmin && (
-                  <Link
-                    to="/admin"
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: 10,
-                      background: '#e11d48',
-                      textDecoration: 'none',
-                      color: '#ffffff',
-                      fontWeight: 700,
-                      fontSize: '0.88rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                    }}
-                  >
-                    <LayoutDashboard size={16} />
-                    <span>Quản trị &amp; AI Dự báo</span>
-                  </Link>
-                )}
-
-                {!isAdmin && (
-                  <button
-                    type="button"
-                    onClick={openChatBox}
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: 10,
-                      border: '1.5px solid #fecdd3',
-                      background: '#ffffff',
-                      color: '#be123c',
-                      fontWeight: 700,
-                      fontSize: '0.88rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 8,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <MessageCircle size={16} color="#e11d48" />
-                    <span>Nhắn tin tư vấn với Admin</span>
-                  </button>
-                )}
-              </div>
+                  {isAdmin && (
+                    <Link
+                      to="/admin"
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        background: '#e11d48',
+                        textDecoration: 'none',
+                        color: '#ffffff',
+                        fontWeight: 700,
+                        fontSize: '0.88rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <LayoutDashboard size={16} />
+                      <span>Quản trị &amp; AI Dự báo</span>
+                    </Link>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Chân ngăn kéo: Tài khoản & Đăng xuất */}
             <div
               style={{
                 paddingTop: 12,

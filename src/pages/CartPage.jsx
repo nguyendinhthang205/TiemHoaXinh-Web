@@ -9,12 +9,55 @@ import {
   X,
   Truck,
   Store,
+  Ticket,
+  Check,
 } from 'lucide-react';
-import api, { formatVND, getFlowerImage } from '../services/api';
+import api, { formatVND, getFlowerImage, writeOrderMeta } from '../services/api';
 import { useApp } from '../context/AppContext';
 
 const SHIPPING_RATE_PER_KM = 5000; // 5.000 đ / km
 const SHOP_PICKUP_ADDRESS = '120 Lê Duẩn, Quận Hải Châu, TP. Đà Nẵng';
+
+const STORE_VOUCHERS = [
+  {
+    code: 'GIAM25K',
+    badge: 'Giảm 25K',
+    title: 'Giảm trực tiếp 25.000đ',
+    desc: 'Đơn hoa từ 300.000đ',
+    minSubtotal: 300000,
+    type: 'fixed',
+    value: 25000,
+  },
+  {
+    code: 'GIAM50K',
+    badge: 'Giảm 50K',
+    title: 'Giảm trực tiếp 50.000đ',
+    desc: 'Đơn hoa từ 600.000đ',
+    minSubtotal: 600000,
+    type: 'fixed',
+    value: 50000,
+  },
+  {
+    code: 'GIAM10',
+    badge: 'Giảm 10%',
+    title: 'Giảm 10% tiền hoa',
+    desc: 'Tối đa 80K • Đơn từ 400.000đ',
+    minSubtotal: 400000,
+    type: 'percent',
+    value: 10,
+    maxDiscount: 80000,
+  },
+  {
+    code: 'FREESHIP',
+    badge: 'Freeship 15K',
+    title: 'Hỗ trợ 15.000đ phí ship',
+    desc: 'Áp dụng khi giao tận nơi',
+    minSubtotal: 0,
+    type: 'shipping',
+    value: 15000,
+    shipOnly: true,
+  },
+];
 
 export default function CartPage() {
   const { user, cartItems, fetchCart, showToast } = useApp();
@@ -33,13 +76,15 @@ export default function CartPage() {
   // Hình thức nhận hàng: 'ship' (Ship tận nơi) | 'pickup' (Tới cửa hàng lấy)
   const [deliveryMethod, setDeliveryMethod] = useState('ship');
   const [distanceKm, setDistanceKm] = useState(3);
-  const [diaChiGiao, setDiaChiGiao] = useState(user?.diaChi || '45 Nguyễn Văn Linh, Hải Châu, Đà Nẵng');
+  const [diaChiGiao, setDiaChiGiao] = useState(
+    user?.diaChi || '45 Nguyễn Văn Linh, Hải Châu, Đà Nẵng'
+  );
 
   const [ngayGiao, setNgayGiao] = useState(getDefaultDeliveryDate);
   const [khungGioGiao, setKhungGioGiao] = useState('08:00 - 10:00 (Buổi sáng)');
   const [ghiChu, setGhiChu] = useState('Chúc mừng bạn một ngày thật rạng rỡ!');
   const [phuongThucThanhToan, setPhuongThucThanhToan] = useState('VietQR');
-  const [maKhuyenMai, setMaKhuyenMai] = useState('');
+  const [selectedVoucherCode, setSelectedVoucherCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [qrOrder, setQrOrder] = useState(null);
@@ -91,6 +136,7 @@ export default function CartPage() {
     try {
       await api.delete('/GioHang');
       await fetchCart();
+      setSelectedVoucherCode('');
       showToast('Đã làm trống toàn bộ giỏ hàng!');
     } catch (err) {
       const msg = err.response?.data?.message || 'Không thể xóa giỏ hàng';
@@ -106,23 +152,62 @@ export default function CartPage() {
 
   const validKm = deliveryMethod === 'ship' ? Math.max(1, Number(distanceKm) || 1) : 0;
   const shippingFee = deliveryMethod === 'ship' ? validKm * SHIPPING_RATE_PER_KM : 0;
-  const totalAmount = flowerSubtotal + shippingFee;
 
-  const saveOrderMeta = (orderId, meta) => {
-    if (!orderId) return;
-    try {
-      const raw = localStorage.getItem('thx_order_meta');
-      const all = raw ? JSON.parse(raw) : {};
-      all[orderId] = { ...(all[orderId] || {}), ...meta };
-      localStorage.setItem('thx_order_meta', JSON.stringify(all));
-    } catch {
-      // Bỏ qua lỗi storage
+  const isVoucherEligible = (v) => {
+    if (!v) return false;
+    if (v.shipOnly && deliveryMethod !== 'ship') return false;
+    return flowerSubtotal >= (v.minSubtotal || 0);
+  };
+
+  const selectedVoucher =
+    STORE_VOUCHERS.find((v) => v.code === selectedVoucherCode && isVoucherEligible(v)) ||
+    null;
+
+  let discountAmount = 0;
+  if (selectedVoucher) {
+    if (selectedVoucher.type === 'fixed') {
+      discountAmount = Math.min(flowerSubtotal, selectedVoucher.value);
+    } else if (selectedVoucher.type === 'percent') {
+      const rawPct = Math.round((flowerSubtotal * selectedVoucher.value) / 100);
+      discountAmount = Math.min(
+        flowerSubtotal,
+        selectedVoucher.maxDiscount
+          ? Math.min(rawPct, selectedVoucher.maxDiscount)
+          : rawPct
+      );
+    } else if (selectedVoucher.type === 'shipping') {
+      discountAmount = Math.min(shippingFee, selectedVoucher.value);
+    }
+  }
+
+  const totalAmount = Math.max(0, flowerSubtotal + shippingFee - discountAmount);
+
+  const handleToggleVoucher = (voucher) => {
+    if (!isVoucherEligible(voucher)) {
+      if (voucher.shipOnly && deliveryMethod !== 'ship') {
+        showToast('Voucher Freeship chỉ áp dụng cho hình thức Ship tận nơi.', 'error');
+      } else {
+        const missing = Math.max(0, voucher.minSubtotal - flowerSubtotal);
+        showToast(
+          `Mua thêm ${formatVND(missing)} tiền hoa để áp dụng voucher ${voucher.badge}.`,
+          'error'
+        );
+      }
+      return;
+    }
+
+    if (selectedVoucherCode === voucher.code) {
+      setSelectedVoucherCode('');
+      showToast(`Đã bỏ áp dụng voucher ${voucher.badge}`);
+    } else {
+      setSelectedVoucherCode(voucher.code);
+      showToast(`Đã áp dụng ưu đãi ${voucher.badge}!`);
     }
   };
 
   const parseBackendError = (err) => {
     if (!err.response) {
-      return 'Không kết nối được tới máy chủ API (https://localhost:44320).';
+      return 'Không kết nối được tới máy chủ Backend.';
     }
     const data = err.response.data;
     if (typeof data === 'string' && data.trim()) return data;
@@ -155,7 +240,13 @@ export default function CartPage() {
         ? '[Tới tiệm lấy - Miễn phí ship]'
         : `[Ship tận nơi ${validKm} km - Phí ship ${formatVND(shippingFee)}]`;
 
-    const fullNote = ghiChu.trim() ? `${ghiChu.trim()} | ${shippingTag}` : shippingTag;
+    const voucherTag = selectedVoucher
+      ? ` | [Voucher ${selectedVoucher.code}: -${formatVND(discountAmount)}]`
+      : '';
+
+    const fullNote = `${
+      ghiChu.trim() ? `${ghiChu.trim()} | ` : ''
+    }${shippingTag}${voucherTag}`;
 
     const payload = {
       tenNguoiNhan: tenNguoiNhan.trim(),
@@ -166,13 +257,11 @@ export default function CartPage() {
       khungGioGiao,
       ghiChu: fullNote,
       phuongThucThanhToan,
-      hinhThucNhanHang: deliveryMethod === 'pickup' ? 'Tới cửa hàng lấy' : 'Ship tận nơi',
+      hinhThucNhanHang:
+        deliveryMethod === 'pickup' ? 'Tới cửa hàng lấy' : 'Ship tận nơi',
       soKm: validKm,
       phiVanChuyen: shippingFee,
     };
-    if (maKhuyenMai.trim()) {
-      payload.maKhuyenMai = maKhuyenMai.trim();
-    }
 
     try {
       setSubmitting(true);
@@ -180,12 +269,18 @@ export default function CartPage() {
       await fetchCart();
       const created = res.data?.donHang || res.data;
       const orderId = created?.maDonHang || created?.id || '';
-      const finalMoney = (created?.tongThanhToan || flowerSubtotal) + shippingFee;
+      const baseFlowerMoney =
+        Number(created?.tongThanhToan) > 0
+          ? Number(created.tongThanhToan)
+          : flowerSubtotal;
+      const finalMoney = Math.max(0, baseFlowerMoney + shippingFee - discountAmount);
 
-      saveOrderMeta(orderId, {
+      await writeOrderMeta(orderId, {
         deliveryMethod,
         distanceKm: validKm,
         shippingFee,
+        voucherCode: selectedVoucher?.code || '',
+        discountAmount,
         paymentMethod: phuongThucThanhToan,
         isPaid: false,
         grandTotal: finalMoney,
@@ -225,9 +320,12 @@ export default function CartPage() {
     navigate('/my-orders');
   };
 
-  const handleConfirmPaid = () => {
+  const handleConfirmPaid = async () => {
     if (qrOrder?.maDonHang) {
-      saveOrderMeta(qrOrder.maDonHang, { isPaid: true, paymentMethod: 'VietQR' });
+      await writeOrderMeta(qrOrder.maDonHang, {
+        isPaid: true,
+        paymentMethod: 'VietQR',
+      });
     }
     setQrOrder(null);
     showToast('Xác nhận thanh toán online qua VietQR thành công!');
@@ -260,7 +358,7 @@ export default function CartPage() {
           <p style={{ color: '#6b7280', marginBottom: 18 }}>
             Giỏ hàng của bạn hiện đang trống.
           </p>
-          <Link to="/shop" className="btn btn-primary">
+          <Link to="/#catalog" className="btn btn-primary">
             Chọn hoa ngay
           </Link>
         </div>
@@ -268,12 +366,12 @@ export default function CartPage() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))',
             gap: 28,
             alignItems: 'start',
           }}
         >
-          {/* Danh sách sản phẩm trong giỏ */}
+          {/* Cột 1: Danh sách sản phẩm + Chọn Voucher ưu đãi + Tóm tắt tiền */}
           <div className="panel">
             <div
               style={{
@@ -321,7 +419,12 @@ export default function CartPage() {
                       {formatVND(item.giaBan || item.donGia)}
                     </div>
                     {typeof stock === 'number' && (
-                      <div style={{ fontSize: '0.78rem', color: overStock ? '#dc2626' : '#6b7280' }}>
+                      <div
+                        style={{
+                          fontSize: '0.78rem',
+                          color: overStock ? '#dc2626' : '#6b7280',
+                        }}
+                      >
                         Tồn kho: <b>{stock}</b> bó{' '}
                         {overStock && (
                           <button
@@ -373,7 +476,143 @@ export default function CartPage() {
               );
             })}
 
-            {/* Tóm tắt tiền hoa & phí ship */}
+            {/* Khu vực chọn Voucher ưu đãi 1 chạm (thay thế ô nhập mã thủ công) */}
+            <div
+              style={{
+                marginTop: 18,
+                padding: 14,
+                borderRadius: 14,
+                background: '#fffafb',
+                border: '1px solid #fce7f3',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 10,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontWeight: 700,
+                    fontSize: '0.9rem',
+                    color: '#be123c',
+                  }}
+                >
+                  <Ticket size={16} />
+                  <span>Chọn Voucher Ưu Đãi</span>
+                </div>
+                {selectedVoucher && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedVoucherCode('')}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#6b7280',
+                      fontSize: '0.76rem',
+                      textDecoration: 'underline',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Bỏ chọn
+                  </button>
+                )}
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))',
+                  gap: 8,
+                }}
+              >
+                {STORE_VOUCHERS.map((v) => {
+                  const eligible = isVoucherEligible(v);
+                  const isSelected = selectedVoucher?.code === v.code;
+
+                  return (
+                    <button
+                      key={v.code}
+                      type="button"
+                      onClick={() => handleToggleVoucher(v)}
+                      style={{
+                        textAlign: 'left',
+                        padding: '10px 11px',
+                        borderRadius: 12,
+                        border: isSelected
+                          ? '2px solid #e11d48'
+                          : eligible
+                          ? '1.5px dashed #fda4af'
+                          : '1.5px dashed #e5e7eb',
+                        background: isSelected
+                          ? '#fff1f2'
+                          : eligible
+                          ? '#ffffff'
+                          : '#f9fafb',
+                        opacity: eligible ? 1 : 0.65,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 3,
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 4,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontWeight: 800,
+                            fontSize: '0.84rem',
+                            color: eligible ? '#e11d48' : '#6b7280',
+                          }}
+                        >
+                          {v.badge}
+                        </span>
+                        {isSelected && (
+                          <span
+                            style={{
+                              width: 18,
+                              height: 18,
+                              borderRadius: '50%',
+                              background: '#e11d48',
+                              color: '#ffffff',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <Check size={11} />
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: '0.74rem',
+                          color: '#4b5563',
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        {v.desc}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Tóm tắt tiền hoa, phí ship & giảm giá Voucher */}
             <div style={{ paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563' }}>
                 <span>Tạm tính tiền hoa:</span>
@@ -390,6 +629,20 @@ export default function CartPage() {
                   {shippingFee === 0 ? 'Miễn phí (0 đ)' : formatVND(shippingFee)}
                 </b>
               </div>
+
+              {selectedVoucher && discountAmount > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    color: '#16a34a',
+                    fontWeight: 600,
+                  }}
+                >
+                  <span>Ưu đãi Voucher ({selectedVoucher.badge}):</span>
+                  <b>-{formatVND(discountAmount)}</b>
+                </div>
+              )}
 
               <div
                 style={{
@@ -408,11 +661,10 @@ export default function CartPage() {
             </div>
           </div>
 
-          {/* Form thông tin nhận hoa */}
+          {/* Cột 2: Form thông tin nhận hoa */}
           <div className="panel">
             <h3 style={{ marginBottom: 16 }}>Thông tin nhận hoa &amp; lời chúc</h3>
             <form onSubmit={handleCheckout}>
-              {/* Chọn hình thức nhận hoa */}
               <div className="form-group">
                 <label className="form-label">Hình thức nhận hoa</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -553,7 +805,8 @@ export default function CartPage() {
                     marginBottom: 14,
                   }}
                 >
-                  📍 <b>Địa chỉ cửa hàng nhận hoa:</b> {SHOP_PICKUP_ADDRESS} (Mở cửa 07:00 – 21:30 hằng ngày).
+                  📍 <b>Địa chỉ cửa hàng nhận hoa:</b> {SHOP_PICKUP_ADDRESS} (Mở cửa 07:00 –
+                  21:30 hằng ngày).
                 </div>
               )}
 
@@ -607,17 +860,6 @@ export default function CartPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Mã khuyến mãi (nếu có)</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="VD: HOAXINH10"
-                  value={maKhuyenMai}
-                  onChange={(e) => setMaKhuyenMai(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
                 <label className="form-label">Phương thức thanh toán</label>
                 <select
                   className="form-control"
@@ -659,7 +901,9 @@ export default function CartPage() {
                 style={{ width: '100%', padding: 13 }}
                 disabled={submitting}
               >
-                {submitting ? 'Đang xử lý đơn hàng...' : `Xác nhận đặt hoa (${formatVND(totalAmount)})`}
+                {submitting
+                  ? 'Đang xử lý đơn hàng...'
+                  : `Xác nhận đặt hoa (${formatVND(totalAmount)})`}
               </button>
             </form>
           </div>
