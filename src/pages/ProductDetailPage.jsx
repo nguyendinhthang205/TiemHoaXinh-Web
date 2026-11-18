@@ -15,7 +15,14 @@ import {
   Heart,
   Zap,
 } from 'lucide-react';
-import api, { AI_BASE_URL, formatVND, getFlowerImage } from '../services/api';
+import api, {
+  AI_BASE_URL,
+  formatVND,
+  getFlowerImage,
+  getMergedProductReviews,
+  syncProductReviewsFromCloud,
+  saveProductReview,
+} from '../services/api';
 import { useApp } from '../context/AppContext';
 import ProductCard from '../components/ProductCard';
 
@@ -77,6 +84,7 @@ export default function ProductDetailPage() {
 
   const [product, setProduct] = useState(null);
   const [recommendations, setRecommendations] = useState([]);
+  const [serverReviews, setServerReviews] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [wishlistIds, setWishlistIds] = useState(() => readWishlist());
   const [qty, setQty] = useState(1);
@@ -92,9 +100,18 @@ export default function ProductDetailPage() {
     return null;
   };
 
+  const refreshMergedReviews = useCallback(
+    (srvList = serverReviews) => {
+      setReviews(getMergedProductReviews(id, srvList));
+    },
+    [id, serverReviews]
+  );
+
   const loadDetail = useCallback(async () => {
     try {
       setLoading(true);
+      await syncProductReviewsFromCloud();
+
       const [spRes, recRes, revRes, allSpRes] = await Promise.all([
         api.get(`/SanPham/${id}`),
         api.get(`/SanPham/${id}/recommendations`).catch(() => ({ data: {} })),
@@ -166,7 +183,7 @@ export default function ProductDetailPage() {
               .filter(Boolean);
           }
         } catch {
-          // Dùng gợi ý dự phòng bên dưới nếu dịch vụ AI nghỉ
+          // Dùng gợi ý dự phòng
         }
       }
 
@@ -188,7 +205,10 @@ export default function ProductDetailPage() {
       });
 
       setRecommendations(recList);
-      setReviews(Array.isArray(revRes.data) ? revRes.data : []);
+
+      const rawSrvReviews = Array.isArray(revRes.data) ? revRes.data : [];
+      setServerReviews(rawSrvReviews);
+      setReviews(getMergedProductReviews(id, rawSrvReviews));
     } finally {
       setLoading(false);
     }
@@ -199,9 +219,15 @@ export default function ProductDetailPage() {
     loadDetail();
 
     const handleProductSync = () => loadDetail();
+    const handleReviewsSync = () => refreshMergedReviews();
+
     window.addEventListener('thx_products_updated', handleProductSync);
-    return () => window.removeEventListener('thx_products_updated', handleProductSync);
-  }, [loadDetail]);
+    window.addEventListener('thx_reviews_updated', handleReviewsSync);
+    return () => {
+      window.removeEventListener('thx_products_updated', handleProductSync);
+      window.removeEventListener('thx_reviews_updated', handleReviewsSync);
+    };
+  }, [loadDetail, refreshMergedReviews]);
 
   const toggleWishlist = () => {
     if (!product?.maSanPham) return;
@@ -242,26 +268,26 @@ export default function ProductDetailPage() {
       showToast('Vui lòng đăng nhập để gửi đánh giá!', 'error');
       return;
     }
-    try {
-      await api.post('/DanhGia', {
-        maSanPham: Number(id),
-        soSao: Number(rating),
-        binhLuan: comment,
-      });
-      showToast('Cảm ơn bạn đã gửi đánh giá sản phẩm!');
-      setComment('');
-      const revRes = await api.get(`/DanhGia/product/${id}`);
-      setReviews(Array.isArray(revRes.data) ? revRes.data : []);
-    } catch (err) {
-      showToast(err.response?.data?.message || 'Không thể gửi đánh giá lúc này', 'error');
-    }
+    const text = comment.trim();
+    if (!text) return;
+
+    await saveProductReview(id, {
+      userName: user.hoTen || user.email || 'Khách hàng',
+      rating: Number(rating),
+      comment: text,
+      isVerifiedBuyer: true,
+    });
+
+    showToast('Cảm ơn bạn! Đánh giá đã được lưu và hiển thị công khai.');
+    setComment('');
+    refreshMergedReviews();
   };
 
   if (loading) {
     return (
       <div className="container" style={{ marginTop: 40 }}>
         <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
-          Đang tải chi tiết sản phẩm và gợi ý hoa đồng điệu...
+          Đang tải chi tiết sản phẩm và đánh giá khách hàng...
         </div>
       </div>
     );
@@ -368,7 +394,6 @@ export default function ProductDetailPage() {
 
       {/* Khung chi tiết sản phẩm */}
       <div className="panel thx-detail-card">
-        {/* Cột ảnh sản phẩm */}
         <div style={{ position: 'relative' }}>
           <img
             src={getFlowerImage(product)}
@@ -404,7 +429,6 @@ export default function ProductDetailPage() {
           </button>
         </div>
 
-        {/* Cột thông tin & quy cách */}
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
             <span className="badge badge-rose">{product.tenDanhMuc || 'Hoa Nghệ Thuật'}</span>
@@ -445,7 +469,6 @@ export default function ProductDetailPage() {
 
           <h1 style={{ fontSize: '1.85rem', marginBottom: 8 }}>{product.tenSanPham}</h1>
 
-          {/* Đánh giá sao */}
           <div
             style={{
               display: 'flex',
@@ -469,7 +492,9 @@ export default function ProductDetailPage() {
             </span>
             <span style={{ color: '#9ca3af' }}>&bull;</span>
             <span style={{ color: '#6b7280' }}>
-              {reviews.length > 0 ? `${reviews.length} đánh giá thực tế` : 'Được khách hàng yêu thích'}
+              {reviews.length > 0
+                ? `${reviews.length} đánh giá từ khách mua hoa`
+                : 'Được khách hàng yêu thích'}
             </span>
           </div>
 
@@ -489,7 +514,6 @@ export default function ProductDetailPage() {
               'Bó hoa tươi tuyển chọn trong ngày, phối màu hài hòa tinh tế, tặng kèm thiệp chúc mừng viết tay và hướng dẫn dưỡng hoa tươi lâu.'}
           </p>
 
-          {/* 3 Cam kết dịch vụ chuẩn mẫu */}
           <div className="thx-promise-grid">
             <div className="thx-promise-box">
               <Truck size={19} color="#e11d48" style={{ flexShrink: 0 }} />
@@ -528,7 +552,6 @@ export default function ProductDetailPage() {
             </div>
           </div>
 
-          {/* Bảng thông số Thành phần hoa & Kích thước */}
           <div
             style={{
               background: '#f9fafb',
@@ -563,7 +586,6 @@ export default function ProductDetailPage() {
             </div>
           </div>
 
-          {/* Bộ chọn số lượng & 2 nút hành động */}
           <div className="thx-detail-cta-row">
             <div
               style={{
@@ -708,15 +730,48 @@ export default function ProductDetailPage() {
                     style={{
                       display: 'flex',
                       justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 8,
                       marginBottom: 6,
                     }}
                   >
-                    <b>{r.hoTenNguoiDung || r.tenNguoiDung || 'Khách hàng'}</b>
-                    <span style={{ color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 3 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <b>{r.hoTenNguoiDung || 'Khách hàng'}</b>
+                      {r.isVerifiedBuyer && (
+                        <span
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                            background: '#dcfce7',
+                            color: '#166534',
+                            padding: '2px 8px',
+                            borderRadius: 999,
+                          }}
+                        >
+                          ✓ Đã đặt mua hoa
+                        </span>
+                      )}
+                    </div>
+                    <span
+                      style={{
+                        color: '#f59e0b',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 3,
+                        fontWeight: 700,
+                      }}
+                    >
                       <Star size={15} fill="#f59e0b" /> {r.soSao}/5
                     </span>
                   </div>
-                  <p style={{ fontSize: '0.9rem', color: '#4b5563' }}>{r.binhLuan}</p>
+                  <p style={{ fontSize: '0.9rem', color: '#4b5563', lineHeight: 1.55 }}>
+                    {r.binhLuan}
+                  </p>
+                  {r.createdAt && (
+                    <div style={{ fontSize: '0.74rem', color: '#9ca3af', marginTop: 6 }}>
+                      {new Date(r.createdAt).toLocaleDateString('vi-VN')}
+                    </div>
+                  )}
                 </div>
               ))
             )}

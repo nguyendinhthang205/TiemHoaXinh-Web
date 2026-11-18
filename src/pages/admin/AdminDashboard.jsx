@@ -64,6 +64,15 @@ const FLOWER_CATEGORIES = [
   { id: 5, name: 'Hoa cưới cầm tay' },
 ];
 
+const HOMEPAGE_NAV_CATEGORIES = [
+  { id: 'sinh-nhat', label: 'Hoa Sinh Nhật' },
+  { id: 'khai-truong', label: 'Hoa Khai Trương' },
+  { id: 'lan-ho-diep', label: 'Lan Hồ Điệp' },
+  { id: 'chu-de', label: 'Chủ Đề' },
+  { id: 'thiet-ke', label: 'Thiết Kế' },
+  { id: 'hoa-tuoi', label: 'Hoa Tươi' },
+];
+
 const QUICK_COLOR_TONES = [
   'Tông Hồng Pastel',
   'Tông Đỏ Rực Rỡ',
@@ -264,6 +273,7 @@ export default function AdminDashboard() {
   const [productForm, setProductForm] = useState({
     tenSanPham: '',
     maDanhMuc: 1,
+    danhMucTrangChu: ['sinh-nhat', 'thiet-ke'],
     giaBan: 450000,
     soLuongTon: 30,
     tongMauSac: '',
@@ -444,7 +454,6 @@ export default function AdminDashboard() {
     return true;
   }, []);
 
-  // Tải nhanh 24 đơn mới nhất theo từng cụm 4 đơn (hoàn tất trong ~1.5 giây)
   const loadRecentOrdersFallback = useCallback(async () => {
     const metaKeys = Object.keys(readLocalOrderMeta())
       .map((k) => Number(k))
@@ -485,7 +494,6 @@ export default function AdminDashboard() {
     setLoadingOrders(true);
 
     try {
-      // Giới hạn 6 giây cho danh sách tổng để không bao giờ treo giao diện
       const res = await api.get('/DonHang', { timeout: 6500 });
       setApiError('');
       const d = res.data;
@@ -771,7 +779,6 @@ export default function AdminDashboard() {
       patch.isPaid = true;
     }
 
-    // 1. Cập nhật ngay lập tức trên giao diện (0ms, tuyệt đối không gây đơ)
     const now = Date.now();
     const localCurrent = readLocalOrderMeta();
     localCurrent[String(orderId)] = {
@@ -805,7 +812,6 @@ export default function AdminDashboard() {
 
     showToast(`Đã chuyển đơn #${orderId} sang "${targetInfo.label}"!`);
 
-    // 2. Đồng bộ ngầm lên SQL Server và đám mây npoint.io
     pushStatusToBackend(orderId, nextCode).then(() => {
       if (nextCode === 'Completed') {
         api.put(`/DonHang/${orderId}/confirm-payment`, null, { timeout: 4500 }).catch(() => {});
@@ -937,6 +943,7 @@ export default function AdminDashboard() {
     setProductForm({
       tenSanPham: '',
       maDanhMuc: 1,
+      danhMucTrangChu: ['sinh-nhat', 'thiet-ke'],
       giaBan: 450000,
       soLuongTon: 30,
       tongMauSac: '',
@@ -956,6 +963,9 @@ export default function AdminDashboard() {
     setProductForm({
       tenSanPham: sp.tenSanPham || '',
       maDanhMuc: sp.maDanhMuc || 1,
+      danhMucTrangChu: Array.isArray(sp.danhMucTrangChu)
+        ? sp.danhMucTrangChu
+        : ['sinh-nhat', 'thiet-ke'],
       giaBan: sp.giaBan || 450000,
       soLuongTon: sp.soLuongTon ?? 20,
       tongMauSac: sp.tongMauSac || '',
@@ -1022,12 +1032,16 @@ export default function AdminDashboard() {
           maSanPham: productModal.id,
         });
         savedData = res.data;
-        showToast(`Đã cập nhật & đồng bộ bó hoa "${cleanName}"!`);
+        showToast(`Đã cập nhật & đồng bộ bó hoa "${cleanName}" lên Trang chủ!`);
       }
 
       const overridePatch = {
         hinhAnhChinh: cleanImg,
         tongMauSac: cleanTone,
+        maDanhMuc: Number(productForm.maDanhMuc),
+        danhMucTrangChu: Array.isArray(productForm.danhMucTrangChu)
+          ? productForm.danhMucTrangChu
+          : [],
       };
       const resolvedId =
         productModal.mode === 'edit'
@@ -2897,7 +2911,7 @@ export default function AdminDashboard() {
         );
       })()}
 
-      {/* Modal Thêm / Sửa sản phẩm */}
+      {/* Modal Thêm / Sửa sản phẩm (Đồng bộ với thanh danh mục Trang chủ) */}
       {productModal && (
         <div className="modal-backdrop">
           <div
@@ -3053,7 +3067,7 @@ export default function AdminDashboard() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Danh mục hoa</label>
+                <label className="form-label">Kiểu thiết kế hoa</label>
                 <select
                   className="form-control"
                   value={productForm.maDanhMuc}
@@ -3067,6 +3081,45 @@ export default function AdminDashboard() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">
+                  Hiển thị trên thanh danh mục Trang chủ (Chọn 1 hoặc nhiều)
+                </label>
+                <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                  {HOMEPAGE_NAV_CATEGORIES.map((navCat) => {
+                    const currentList = Array.isArray(productForm.danhMucTrangChu)
+                      ? productForm.danhMucTrangChu
+                      : [];
+                    const checked = currentList.includes(navCat.id);
+                    return (
+                      <button
+                        key={navCat.id}
+                        type="button"
+                        onClick={() => {
+                          const nextList = checked
+                            ? currentList.filter((x) => x !== navCat.id)
+                            : [...currentList, navCat.id];
+                          setProductForm({ ...productForm, danhMucTrangChu: nextList });
+                        }}
+                        style={{
+                          padding: '5px 11px',
+                          borderRadius: 999,
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          border: checked ? '1.5px solid #e11d48' : '1px solid #e5e7eb',
+                          background: checked ? '#fff1f2' : '#ffffff',
+                          color: checked ? '#be123c' : '#4b5563',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {checked ? '✓ ' : '+ '}
+                        {navCat.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

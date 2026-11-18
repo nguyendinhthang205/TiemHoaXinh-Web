@@ -13,8 +13,17 @@ export const AI_URL = AI_BASE_URL;
 const CLOUD_BIN_URL = 'https://api.npoint.io/639a3cda635df1c41eb4';
 const ORDER_META_KEY = 'thx_order_meta';
 const PRODUCT_SYNC_KEY = 'thx_product_overrides';
+const REVIEWS_STORAGE_KEY = 'thx_product_reviews';
 const HOTLINE_STORAGE_KEY = 'thx_hotline_number';
 export const DEFAULT_HOTLINE = '0905 123 456';
+
+const SQL_CATEGORY_NAMES = {
+  1: 'Bó hoa tươi nghệ thuật',
+  2: 'Giỏ hoa chúc mừng',
+  3: 'Lẵng hoa khai trương',
+  4: 'Hộp hoa cao cấp',
+  5: 'Hoa cưới cầm tay',
+};
 
 let inFlightCloudGet = null;
 let lastCloudPayload = null;
@@ -33,7 +42,6 @@ async function fetchCloudWithTimeout(options = {}, timeoutMs = 5500) {
   }
 }
 
-// Gộp các yêu cầu đọc npoint.io trong vòng 3 giây thành 1 luồng duy nhất để tránh nghẹt băng thông
 async function getSharedCloudBin(forceFresh = false) {
   const now = Date.now();
   if (!forceFresh && lastCloudPayload && now - lastCloudFetchedAt < 3000) {
@@ -118,7 +126,7 @@ export async function syncHotlineFromCloud() {
       return remoteHotline;
     }
   } catch {
-    // Bỏ qua nếu mạng chậm
+    // Bỏ qua
   }
   return getHotlineNumber();
 }
@@ -250,7 +258,7 @@ export async function writeOrderMeta(orderId, patch) {
 
     await pushCompactCloudBin(safeBin);
   } catch {
-    // Giữ bản lưu cục bộ nếu mạng gián đoạn
+    // Giữ bản lưu cục bộ
   }
 
   return localCurrent;
@@ -301,7 +309,7 @@ export async function syncProductOverridesFromCloud() {
       const rItem = remoteOverrides[key];
       const lTime = Number(lItem.updatedAt || 0);
       const rTime = Number(rItem?.updatedAt || 0);
-      if ((!rItem && lItem.hinhAnhChinh) || lTime > rTime) {
+      if ((!rItem && (lItem.hinhAnhChinh || lItem.danhMucTrangChu)) || lTime > rTime) {
         const stamped = { ...lItem, updatedAt: lTime || Date.now() };
         merged[key] = stamped;
         remoteOverrides[key] = stamped;
@@ -361,7 +369,7 @@ export async function saveProductOverride(key, patch) {
 
     await pushCompactCloudBin(safeBin);
   } catch {
-    // Giữ bản lưu cục bộ nếu mạng gián đoạn
+    // Giữ bản lưu cục bộ
   }
 }
 
@@ -375,7 +383,16 @@ function mergeProductOverride(product) {
   const byName = nameKey ? overrides[nameKey] : null;
   const matched = byId || byName;
 
-  if (!matched) return product;
+  const resolvedCatId = matched?.maDanhMuc ?? product.maDanhMuc;
+  const resolvedCatName =
+    SQL_CATEGORY_NAMES[Number(resolvedCatId)] || product.tenDanhMuc || 'Hoa Nghệ Thuật';
+
+  if (!matched) {
+    return {
+      ...product,
+      tenDanhMuc: resolvedCatName,
+    };
+  }
 
   return {
     ...product,
@@ -383,7 +400,171 @@ function mergeProductOverride(product) {
     hinhAnhChinh: matched.hinhAnhChinh || product.hinhAnhChinh,
     hinhAnh: matched.hinhAnhChinh || product.hinhAnh,
     tongMauSac: matched.tongMauSac || product.tongMauSac,
+    maDanhMuc: resolvedCatId,
+    tenDanhMuc: resolvedCatName,
+    danhMucTrangChu: Array.isArray(matched.danhMucTrangChu)
+      ? matched.danhMucTrangChu
+      : product.danhMucTrangChu,
   };
+}
+
+// --- HỆ THỐNG LƯU & ĐỒNG BỘ ĐÁNH GIÁ KHÁCH HÀNG ---
+function readAllLocalReviewsMap() {
+  try {
+    const raw = localStorage.getItem(REVIEWS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function getLocalProductReviews(maSanPham) {
+  if (maSanPham == null) return [];
+  const all = readAllLocalReviewsMap();
+  const list = all[String(maSanPham)];
+  return Array.isArray(list) ? list : [];
+}
+
+export function getMergedProductReviews(maSanPham, serverReviews = []) {
+  const localList = getLocalProductReviews(maSanPham);
+  const normalizedServer = (Array.isArray(serverReviews) ? serverReviews : []).map((r) => ({
+    maDanhGia: r.maDanhGia || `srv-${r.ngayDanhGia || Math.random()}`,
+    hoTenNguoiDung: r.hoTenNguoiDung || r.tenNguoiDung || 'Khách hàng',
+    soSao: Number(r.soSao) || 5,
+    binhLuan: r.binhLuan || '',
+    createdAt: r.ngayDanhGia || r.createdAt || '',
+    isVerifiedBuyer: true,
+  }));
+
+  const combined = [...localList];
+  normalizedServer.forEach((srv) => {
+    const isDuplicate = combined.some(
+      (loc) =>
+        loc.binhLuan.trim().toLowerCase() === srv.binhLuan.trim().toLowerCase() &&
+        Number(loc.soSao) === Number(srv.soSao)
+    );
+    if (!isDuplicate) {
+      combined.push(srv);
+    }
+  });
+
+  combined.sort((a, b) => {
+    const ta = new Date(a.createdAt || 0).getTime() || 0;
+    const tb = new Date(b.createdAt || 0).getTime() || 0;
+    return tb - ta;
+  });
+
+  return combined;
+}
+
+export function getProductRatingStats(maSanPham, serverReviews = []) {
+  const list = getMergedProductReviews(maSanPham, serverReviews);
+  if (list.length === 0) {
+    return { avg: '4.9', count: 0 };
+  }
+  const sum = list.reduce((acc, r) => acc + (Number(r.soSao) || 5), 0);
+  return {
+    avg: (sum / list.length).toFixed(1),
+    count: list.length,
+  };
+}
+
+export async function syncProductReviewsFromCloud() {
+  const localMap = readAllLocalReviewsMap();
+  try {
+    const raw = await getSharedCloudBin(false);
+    if (!raw) return localMap;
+    const remoteMap =
+      raw.__product_reviews__ &&
+      typeof raw.__product_reviews__ === 'object' &&
+      !Array.isArray(raw.__product_reviews__)
+        ? raw.__product_reviews__
+        : {};
+
+    const mergedMap = { ...localMap };
+    let changed = false;
+
+    Object.entries(remoteMap).forEach(([spId, rList]) => {
+      if (!Array.isArray(rList)) return;
+      const currentList = Array.isArray(mergedMap[spId]) ? [...mergedMap[spId]] : [];
+      rList.forEach((rItem) => {
+        if (!rItem || !rItem.binhLuan) return;
+        const exists = currentList.some(
+          (x) =>
+            x.maDanhGia === rItem.maDanhGia ||
+            (x.hoTenNguoiDung === rItem.hoTenNguoiDung &&
+              x.binhLuan.trim() === rItem.binhLuan.trim())
+        );
+        if (!exists) {
+          currentList.push(rItem);
+          changed = true;
+        }
+      });
+      mergedMap[spId] = currentList;
+    });
+
+    if (changed) {
+      localStorage.setItem(REVIEWS_STORAGE_KEY, JSON.stringify(mergedMap));
+      window.dispatchEvent(new Event('thx_reviews_updated'));
+    }
+    return mergedMap;
+  } catch {
+    return localMap;
+  }
+}
+
+export async function saveProductReview(
+  maSanPham,
+  { userName, rating = 5, comment = '', isVerifiedBuyer = true }
+) {
+  if (maSanPham == null || !String(comment).trim()) return null;
+  const spKey = String(maSanPham);
+  const newReview = {
+    maDanhGia: `rev-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    hoTenNguoiDung: String(userName || 'Khách hàng').trim(),
+    soSao: Math.min(5, Math.max(1, Number(rating) || 5)),
+    binhLuan: String(comment).trim(),
+    createdAt: new Date().toISOString(),
+    isVerifiedBuyer,
+  };
+
+  const allLocal = readAllLocalReviewsMap();
+  const existing = Array.isArray(allLocal[spKey]) ? allLocal[spKey] : [];
+  allLocal[spKey] = [newReview, ...existing].slice(0, 30);
+
+  try {
+    localStorage.setItem(REVIEWS_STORAGE_KEY, JSON.stringify(allLocal));
+    window.dispatchEvent(new Event('thx_reviews_updated'));
+  } catch {
+    // Bỏ qua
+  }
+
+  // Đẩy lên đám mây để mọi tài khoản và thiết bị đều nhìn thấy đánh giá
+  getSharedCloudBin(true)
+    .then((raw) => {
+      const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
+      const remoteMap =
+        safeBin.__product_reviews__ && typeof safeBin.__product_reviews__ === 'object'
+          ? { ...safeBin.__product_reviews__ }
+          : {};
+      const remoteList = Array.isArray(remoteMap[spKey]) ? remoteMap[spKey] : [];
+      remoteMap[spKey] = [newReview, ...remoteList].slice(0, 20);
+      safeBin.__product_reviews__ = remoteMap;
+      return pushCompactCloudBin(safeBin);
+    })
+    .catch(() => {});
+
+  // Đồng thời gửi tới Backend SQL Server nếu có hỗ trợ
+  api
+    .post('/DanhGia', {
+      maSanPham: Number(maSanPham),
+      soSao: newReview.soSao,
+      binhLuan: newReview.binhLuan,
+    })
+    .catch(() => {});
+
+  return newReview;
 }
 
 const api = axios.create({

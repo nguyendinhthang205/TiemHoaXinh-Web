@@ -15,7 +15,12 @@ import {
   Heart,
   Star,
 } from 'lucide-react';
-import api, { formatVND, getFlowerImage } from '../services/api';
+import api, {
+  formatVND,
+  getFlowerImage,
+  getProductRatingStats,
+  syncProductReviewsFromCloud,
+} from '../services/api';
 import { useApp } from '../context/AppContext';
 
 const WISHLIST_STORAGE_KEY = 'thx_wishlist_ids';
@@ -89,8 +94,8 @@ export default function HomePage() {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [wishlistIds, setWishlistIds] = useState(() => readWishlist());
+  const [, setReviewTick] = useState(0);
 
-  // Trạng thái bộ lọc hợp nhất ngay trên Trang chủ
   const [keyword, setKeyword] = useState(searchParams.get('q') || '');
   const [activeNavCat, setActiveNavCat] = useState(searchParams.get('cat') || '');
   const [subQuery, setSubQuery] = useState(searchParams.get('sub') || '');
@@ -124,16 +129,21 @@ export default function HomePage() {
 
   useEffect(() => {
     loadProducts();
-    const handleSync = () => loadProducts();
-    window.addEventListener('thx_products_updated', handleSync);
-    window.addEventListener('storage', handleSync);
+    syncProductReviewsFromCloud().then(() => setReviewTick((t) => t + 1));
+
+    const handleProductSync = () => loadProducts();
+    const handleReviewSync = () => setReviewTick((t) => t + 1);
+
+    window.addEventListener('thx_products_updated', handleProductSync);
+    window.addEventListener('thx_reviews_updated', handleReviewSync);
+    window.addEventListener('storage', handleProductSync);
     return () => {
-      window.removeEventListener('thx_products_updated', handleSync);
-      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('thx_products_updated', handleProductSync);
+      window.removeEventListener('thx_reviews_updated', handleReviewSync);
+      window.removeEventListener('storage', handleProductSync);
     };
   }, [loadProducts]);
 
-  // Đồng bộ khi người dùng chọn danh mục trên thanh ngang hoặc tìm kiếm trên Header
   useEffect(() => {
     const qParam = searchParams.get('q') || '';
     const catParam = searchParams.get('cat') || '';
@@ -196,7 +206,6 @@ export default function HomePage() {
     new Set(products.map((p) => p.tongMauSac).filter(Boolean))
   );
 
-  // Lọc theo danh mục thanh ngang + từ khóa con + bộ lọc AI
   const filteredProducts = products
     .filter((p) => {
       const price = Number(p.giaBan || 0);
@@ -220,10 +229,15 @@ export default function HomePage() {
         const subKw = subQuery.toLowerCase();
         if (!text.includes(subKw)) return false;
       } else if (activeNavCat && CATEGORY_RULES[activeNavCat]) {
-        const rule = CATEGORY_RULES[activeNavCat];
-        const matchKeyword = rule.keywords.some((kw) => text.includes(kw));
-        const matchCatId = rule.categories.includes(Number(p.maDanhMuc));
-        if (!matchKeyword && !matchCatId) return false;
+        // Ưu tiên danh mục Trang chủ mà Admin đã chọn trong modal Cập Nhật Mẫu Hoa
+        if (Array.isArray(p.danhMucTrangChu) && p.danhMucTrangChu.length > 0) {
+          if (!p.danhMucTrangChu.includes(activeNavCat)) return false;
+        } else {
+          const rule = CATEGORY_RULES[activeNavCat];
+          const matchKeyword = rule.keywords.some((kw) => text.includes(kw));
+          const matchCatId = rule.categories.includes(Number(p.maDanhMuc));
+          if (!matchKeyword && !matchCatId) return false;
+        }
       }
 
       return true;
@@ -640,7 +654,7 @@ export default function HomePage() {
           <div>
             <h2 style={{ fontSize: '1.65rem', marginBottom: 4 }}>{activeHeadingTitle}</h2>
             <p style={{ fontSize: '0.88rem', color: '#6b7280' }}>
-              Bấm vào bất kỳ mẫu hoa nào để xem hệ thống AI gợi ý các bó hoa đồng điệu nhất
+              Bấm vào bất kỳ mẫu hoa nào để xem đánh giá thực tế và hệ thống AI gợi ý mẫu đồng điệu
             </p>
           </div>
 
@@ -657,7 +671,6 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* Khung Smart AI Gợi ý theo Dịp tặng, Ngân sách & Màu sắc */}
         <div className="thx-ai-guide-box">
           <div
             style={{
@@ -686,7 +699,6 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Hàng 1: Dịp tặng */}
           <div style={{ marginBottom: 10 }}>
             <div
               style={{
@@ -728,7 +740,6 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Hàng 2: Ngân sách */}
           <div style={{ marginBottom: uniqueColors.length > 0 ? 10 : 0 }}>
             <div
               style={{
@@ -766,7 +777,6 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Hàng 3: Tông màu */}
           {uniqueColors.length > 0 && (
             <div>
               <div
@@ -819,7 +829,6 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* Thanh tìm kiếm từ khóa, kiểu thiết kế & sắp xếp */}
         <div
           className="panel"
           style={{
@@ -920,6 +929,7 @@ export default function HomePage() {
               const isOutOfStock = stock <= 0;
               const isLowStock = stock > 0 && stock <= 5;
               const isLiked = wishlistIds.includes(sp.maSanPham);
+              const ratingStats = getProductRatingStats(sp.maSanPham);
 
               return (
                 <div
@@ -1026,7 +1036,10 @@ export default function HomePage() {
                         }}
                       >
                         <Star size={13} fill="#f59e0b" color="#f59e0b" />
-                        <span>4.9</span>
+                        <span>
+                          {ratingStats.avg}
+                          {ratingStats.count > 0 ? ` (${ratingStats.count})` : ''}
+                        </span>
                       </span>
 
                       <span

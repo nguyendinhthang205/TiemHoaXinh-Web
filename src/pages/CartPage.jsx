@@ -11,11 +11,17 @@ import {
   Store,
   Ticket,
   Check,
+  Star,
 } from 'lucide-react';
-import api, { formatVND, getFlowerImage, writeOrderMeta } from '../services/api';
+import api, {
+  formatVND,
+  getFlowerImage,
+  writeOrderMeta,
+  saveProductReview,
+} from '../services/api';
 import { useApp } from '../context/AppContext';
 
-const SHIPPING_RATE_PER_KM = 5000; // 5.000 đ / km
+const SHIPPING_RATE_PER_KM = 5000;
 const SHOP_PICKUP_ADDRESS = '120 Lê Duẩn, Quận Hải Châu, TP. Đà Nẵng';
 
 const STORE_VOUCHERS = [
@@ -59,6 +65,12 @@ const STORE_VOUCHERS = [
   },
 ];
 
+const QUICK_REVIEW_TAGS = [
+  'Mẫu hoa đẹp, phối màu tinh tế',
+  'Đặt hoa nhanh gọn, tư vấn nhiệt tình',
+  'Rất hài lòng với chất lượng hoa tươi',
+];
+
 export default function CartPage() {
   const { user, cartItems, fetchCart, showToast } = useApp();
   const navigate = useNavigate();
@@ -73,7 +85,6 @@ export default function CartPage() {
   const [tenNguoiNhan, setTenNguoiNhan] = useState(user?.hoTen || '');
   const [sdtNguoiNhan, setSdtNguoiNhan] = useState(user?.soDienThoai || '0905111222');
 
-  // Hình thức nhận hàng: 'ship' (Ship tận nơi) | 'pickup' (Tới cửa hàng lấy)
   const [deliveryMethod, setDeliveryMethod] = useState('ship');
   const [distanceKm, setDistanceKm] = useState(3);
   const [diaChiGiao, setDiaChiGiao] = useState(
@@ -88,6 +99,11 @@ export default function CartPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [qrOrder, setQrOrder] = useState(null);
+
+  // Hộp thoại đánh giá ngay sau khi đặt hoa xong
+  const [postOrderReviewData, setPostOrderReviewData] = useState(null);
+  const [reviewDrafts, setReviewDrafts] = useState({});
+  const [submittingReviews, setSubmittingReviews] = useState(false);
 
   useEffect(() => {
     api
@@ -205,6 +221,55 @@ export default function CartPage() {
     }
   };
 
+  const openPostCheckoutReview = (orderId, orderedItems) => {
+    const initialDrafts = {};
+    (orderedItems || []).forEach((it) => {
+      initialDrafts[it.maSanPham] = {
+        rating: 5,
+        comment: 'Bó hoa rất đẹp, tư vấn nhiệt tình!',
+      };
+    });
+    setReviewDrafts(initialDrafts);
+    setPostOrderReviewData({
+      maDonHang: orderId,
+      items: orderedItems || [],
+    });
+  };
+
+  const handleSubmitPostOrderReviews = async (e) => {
+    e.preventDefault();
+    if (!postOrderReviewData?.items?.length) {
+      setPostOrderReviewData(null);
+      navigate('/my-orders');
+      return;
+    }
+
+    try {
+      setSubmittingReviews(true);
+      const reviewerName =
+        user?.hoTen || tenNguoiNhan.trim() || user?.email || 'Khách hàng';
+
+      for (const item of postOrderReviewData.items) {
+        const draft = reviewDrafts[item.maSanPham] || { rating: 5, comment: '' };
+        const text = String(draft.comment || '').trim();
+        if (text) {
+          await saveProductReview(item.maSanPham, {
+            userName: reviewerName,
+            rating: draft.rating || 5,
+            comment: text,
+            isVerifiedBuyer: true,
+          });
+        }
+      }
+
+      showToast('Cảm ơn bạn! Đánh giá đã được lưu và hiển thị trên mẫu hoa.');
+      setPostOrderReviewData(null);
+      navigate('/my-orders');
+    } finally {
+      setSubmittingReviews(false);
+    }
+  };
+
   const parseBackendError = (err) => {
     if (!err.response) {
       return 'Không kết nối được tới máy chủ Backend.';
@@ -229,6 +294,13 @@ export default function CartPage() {
       navigate('/login');
       return;
     }
+
+    const orderedSnapshot = cartItems.map((it) => ({
+      maSanPham: it.maSanPham,
+      tenSanPham: it.tenSanPham,
+      giaBan: it.giaBan || it.donGia || 0,
+      soLuong: it.soLuong || 1,
+    }));
 
     const finalAddress =
       deliveryMethod === 'pickup'
@@ -300,10 +372,11 @@ export default function CartPage() {
           maDonHang: orderId,
           tongTien: finalMoney,
           qrUrl,
+          items: orderedSnapshot,
         });
       } else {
-        showToast('Đặt hàng thành công! Bạn sẽ thanh toán tiền mặt khi nhận hoa.');
-        navigate('/my-orders');
+        showToast('Đặt hàng thành công! Hãy chia sẻ cảm nhận về bó hoa nhé.');
+        openPostCheckoutReview(orderId, orderedSnapshot);
       }
     } catch (err) {
       const msg = parseBackendError(err);
@@ -315,21 +388,24 @@ export default function CartPage() {
   };
 
   const handleCloseQrModal = () => {
+    const items = qrOrder?.items || [];
+    const orderId = qrOrder?.maDonHang || '';
     setQrOrder(null);
-    showToast('Đơn hàng đã được lưu ở trạng thái Chờ thanh toán.');
-    navigate('/my-orders');
+    openPostCheckoutReview(orderId, items);
   };
 
   const handleConfirmPaid = async () => {
-    if (qrOrder?.maDonHang) {
-      await writeOrderMeta(qrOrder.maDonHang, {
+    const items = qrOrder?.items || [];
+    const orderId = qrOrder?.maDonHang || '';
+    if (orderId) {
+      await writeOrderMeta(orderId, {
         isPaid: true,
         paymentMethod: 'VietQR',
       });
     }
     setQrOrder(null);
-    showToast('Xác nhận thanh toán online qua VietQR thành công!');
-    navigate('/my-orders');
+    showToast('Xác nhận thanh toán VietQR thành công!');
+    openPostCheckoutReview(orderId, items);
   };
 
   if (!user) {
@@ -353,7 +429,7 @@ export default function CartPage() {
     <div className="container" style={{ marginTop: 32, marginBottom: 48 }}>
       <h1 style={{ fontSize: '2rem', marginBottom: 22 }}>Giỏ Hàng &amp; Thanh Toán</h1>
 
-      {cartItems.length === 0 && !qrOrder ? (
+      {cartItems.length === 0 && !qrOrder && !postOrderReviewData ? (
         <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
           <p style={{ color: '#6b7280', marginBottom: 18 }}>
             Giỏ hàng của bạn hiện đang trống.
@@ -371,7 +447,7 @@ export default function CartPage() {
             alignItems: 'start',
           }}
         >
-          {/* Cột 1: Danh sách sản phẩm + Chọn Voucher ưu đãi + Tóm tắt tiền */}
+          {/* Cột 1: Danh sách sản phẩm + Chọn Voucher + Tóm tắt tiền */}
           <div className="panel">
             <div
               style={{
@@ -476,7 +552,7 @@ export default function CartPage() {
               );
             })}
 
-            {/* Khu vực chọn Voucher ưu đãi 1 chạm (thay thế ô nhập mã thủ công) */}
+            {/* Chọn Voucher ưu đãi 1 chạm */}
             <div
               style={{
                 marginTop: 18,
@@ -612,7 +688,6 @@ export default function CartPage() {
               </div>
             </div>
 
-            {/* Tóm tắt tiền hoa, phí ship & giảm giá Voucher */}
             <div style={{ paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563' }}>
                 <span>Tạm tính tiền hoa:</span>
@@ -959,6 +1034,180 @@ export default function CartPage() {
                 <span>Tôi đã chuyển khoản xong</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cửa sổ Đánh giá bó hoa ngay sau khi đặt hàng thành công */}
+      {postOrderReviewData && (
+        <div className="modal-backdrop">
+          <div
+            className="modal-box"
+            style={{
+              maxWidth: 540,
+              width: '94%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              padding: 24,
+              position: 'relative',
+            }}
+          >
+            <div style={{ textAlign: 'center', marginBottom: 16 }}>
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: '50%',
+                  background: '#dcfce7',
+                  color: '#16a34a',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: 8,
+                }}
+              >
+                <CheckCircle size={26} />
+              </div>
+              <h2 style={{ fontSize: '1.35rem', marginBottom: 4 }}>
+                Đặt Hoa Thành Công {postOrderReviewData.maDonHang ? `(#${postOrderReviewData.maDonHang})` : ''}!
+              </h2>
+              <p style={{ fontSize: '0.86rem', color: '#6b7280' }}>
+                Chia sẻ nhanh đánh giá của bạn để hiển thị cho các khách hàng khác khi xem mẫu hoa nhé
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmitPostOrderReviews}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 18 }}>
+                {postOrderReviewData.items.map((item) => {
+                  const draft = reviewDrafts[item.maSanPham] || {
+                    rating: 5,
+                    comment: '',
+                  };
+                  return (
+                    <div
+                      key={item.maSanPham}
+                      style={{
+                        border: '1px solid #fce7f3',
+                        background: '#fffafb',
+                        borderRadius: 14,
+                        padding: 13,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          marginBottom: 10,
+                        }}
+                      >
+                        <img
+                          src={getFlowerImage(item)}
+                          alt={item.tenSanPham}
+                          style={{
+                            width: 48,
+                            height: 48,
+                            borderRadius: 10,
+                            objectFit: 'cover',
+                          }}
+                        />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.94rem' }}>
+                            {item.tenSanPham}
+                          </div>
+                          <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                            {[1, 2, 3, 4, 5].map((starVal) => (
+                              <button
+                                key={starVal}
+                                type="button"
+                                onClick={() =>
+                                  setReviewDrafts((prev) => ({
+                                    ...prev,
+                                    [item.maSanPham]: { ...draft, rating: starVal },
+                                  }))
+                                }
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  padding: 2,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <Star
+                                  size={20}
+                                  fill={starVal <= draft.rating ? '#f59e0b' : 'none'}
+                                  color={starVal <= draft.rating ? '#f59e0b' : '#d1d5db'}
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                        {QUICK_REVIEW_TAGS.map((tag) => (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() =>
+                              setReviewDrafts((prev) => ({
+                                ...prev,
+                                [item.maSanPham]: { ...draft, comment: tag },
+                              }))
+                            }
+                            style={{
+                              fontSize: '0.73rem',
+                              padding: '3px 9px',
+                              borderRadius: 999,
+                              border: '1px solid #fecdd3',
+                              background: '#ffffff',
+                              color: '#be123c',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            + {tag}
+                          </button>
+                        ))}
+                      </div>
+
+                      <textarea
+                        className="form-control"
+                        rows={2}
+                        placeholder="Nhập cảm nhận của bạn về mẫu hoa này..."
+                        value={draft.comment}
+                        onChange={(e) =>
+                          setReviewDrafts((prev) => ({
+                            ...prev,
+                            [item.maSanPham]: { ...draft, comment: e.target.value },
+                          }))
+                        }
+                        style={{ fontSize: '0.85rem', background: '#ffffff' }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPostOrderReviewData(null);
+                    navigate('/my-orders');
+                  }}
+                  className="btn btn-outline btn-sm"
+                >
+                  Bỏ qua &amp; Xem đơn hàng
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingReviews}
+                  className="btn btn-primary btn-sm"
+                >
+                  {submittingReviews ? 'Đang lưu...' : 'Gửi đánh giá & Xem đơn hàng'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
