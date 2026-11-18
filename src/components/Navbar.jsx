@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   Flower2,
   ShoppingCart,
@@ -11,20 +11,101 @@ import {
   X,
   ShieldCheck,
   LayoutDashboard,
-  ChevronRight,
   Search,
+  ChevronDown,
+  Phone,
+  ClipboardList,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { getHotlineNumber } from '../services/api';
+
+export const STORE_CATEGORY_MENU = [
+  {
+    id: '',
+    label: 'TẤT CẢ HOA',
+    subItems: [],
+  },
+  {
+    id: 'sinh-nhat',
+    label: 'HOA SINH NHẬT',
+    subItems: [
+      { label: 'HOA SINH NHẬT SANG TRỌNG', query: 'sang trọng' },
+      { label: 'HOA SINH NHẬT TẶNG NGƯỜI YÊU', query: 'pastel' },
+      { label: 'HOA SINH NHẬT TẶNG MẸ', query: 'giỏ hoa' },
+      { label: 'BÓ HOA SINH NHẬT TƯƠI TẮN', query: 'hướng dương' },
+    ],
+  },
+  {
+    id: 'khai-truong',
+    label: 'HOA KHAI TRƯƠNG',
+    subItems: [
+      { label: 'KỆ HOA KHAI TRƯƠNG', query: 'kệ hoa' },
+      { label: 'LẴNG HOA KHAI TRƯƠNG', query: 'lẵng hoa' },
+      { label: 'GIỎ HOA KHAI TRƯƠNG ĐỂ BÀN', query: 'giỏ hoa' },
+      { label: 'HOA KHAI TRƯƠNG HỒNG PHÁT', query: 'hồng phát' },
+    ],
+  },
+  {
+    id: 'lan-ho-diep',
+    label: 'LAN HỒ ĐIỆP',
+    subItems: [
+      { label: 'LAN HỒ ĐIỆP TRẮNG SANG TRỌNG', query: 'lan hồ điệp' },
+      { label: 'GIỎ LAN HỒ ĐIỆP CHÚC MỪNG', query: 'lan' },
+    ],
+  },
+  {
+    id: 'chu-de',
+    label: 'CHỦ ĐỀ',
+    subItems: [
+      { label: 'HOA TÌNH YÊU & KỶ NIỆM', query: 'tình yêu' },
+      { label: 'HOA CHÚC MỪNG TRI ÂN', query: 'tri ân' },
+      { label: 'HOA CƯỚI CẦM TAY CÔ DÂU', query: 'cưới' },
+    ],
+  },
+  {
+    id: 'thiet-ke',
+    label: 'THIẾT KẾ',
+    subItems: [
+      { label: 'BÓ HOA TƯƠI NGHỆ THUẬT', dm: '1' },
+      { label: 'GIỎ HOA CHÚC MỪNG', dm: '2' },
+      { label: 'LẴNG HOA KHAI TRƯƠNG', dm: '3' },
+      { label: 'HỘP HOA CAO CẤP', dm: '4' },
+      { label: 'HOA CƯỚI CẦM TAY', dm: '5' },
+    ],
+  },
+  {
+    id: 'hoa-tuoi',
+    label: 'HOA TƯƠI',
+    subItems: [
+      { label: 'HOA HỒNG', query: 'hồng' },
+      { label: 'HOA HƯỚNG DƯƠNG', query: 'hướng dương' },
+      { label: 'HOA TULIP', query: 'tulip' },
+      { label: 'HOA BABY TRẮNG', query: 'baby' },
+    ],
+  },
+];
+
+function formatVietnamPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length === 10) {
+    return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  }
+  return String(raw || '').trim();
+}
 
 export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const appCtx = useApp() || {};
   const { user, cartItems = [], logout, setUser } = appCtx;
 
+  const [hotline, setHotline] = useState(() => getHotlineNumber());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedMobileCat, setExpandedMobileCat] = useState('');
+  const [hoveredCat, setHoveredCat] = useState(null);
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
 
   const roleStr = String(
     user?.vaiTro || user?.role || user?.quyen || ''
@@ -40,10 +121,23 @@ export default function Navbar() {
     ? cartItems.reduce((sum, item) => sum + (Number(item.soLuong) || 1), 0)
     : 0;
 
+  const activeCat = searchParams.get('cat') || '';
+
+  useEffect(() => {
+    const syncHotline = () => setHotline(getHotlineNumber());
+    window.addEventListener('thx_hotline_updated', syncHotline);
+    window.addEventListener('storage', syncHotline);
+    return () => {
+      window.removeEventListener('thx_hotline_updated', syncHotline);
+      window.removeEventListener('storage', syncHotline);
+    };
+  }, []);
+
   useEffect(() => {
     setMobileMenuOpen(false);
     setMobileSearchOpen(false);
-  }, [location.pathname]);
+    setHoveredCat(null);
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     if (!mobileMenuOpen) return undefined;
@@ -54,15 +148,29 @@ export default function Navbar() {
     };
   }, [mobileMenuOpen]);
 
+  const handleSelectCategory = (catId, subObj = null) => {
+    setMobileMenuOpen(false);
+    setHoveredCat(null);
+
+    const params = new URLSearchParams();
+    if (catId) params.set('cat', catId);
+    if (subObj?.dm) params.set('dm', subObj.dm);
+    if (subObj?.query) params.set('sub', subObj.query);
+    if (subObj?.label) params.set('subLabel', subObj.label);
+
+    const qs = params.toString();
+    navigate(qs ? `/?${qs}#catalog` : '/#catalog');
+  };
+
   const handleSearchSubmit = (e) => {
     e.preventDefault();
     const cleaned = searchQuery.trim();
     setMobileMenuOpen(false);
     setMobileSearchOpen(false);
     if (cleaned) {
-      navigate(`/shop?q=${encodeURIComponent(cleaned)}`);
+      navigate(`/?q=${encodeURIComponent(cleaned)}#catalog`);
     } else {
-      navigate('/shop');
+      navigate('/#catalog');
     }
   };
 
@@ -76,12 +184,8 @@ export default function Navbar() {
     sessionStorage.removeItem('token');
     sessionStorage.removeItem('user');
 
-    if (typeof logout === 'function') {
-      logout();
-    }
-    if (typeof setUser === 'function') {
-      setUser(null);
-    }
+    if (typeof logout === 'function') logout();
+    if (typeof setUser === 'function') setUser(null);
     setMobileMenuOpen(false);
     navigate('/login');
   };
@@ -91,30 +195,8 @@ export default function Navbar() {
     window.dispatchEvent(new Event('thx_open_customer_chat'));
   };
 
-  const navLinkStyle = ({ isActive }) => ({
-    textDecoration: 'none',
-    fontWeight: isActive ? 700 : 500,
-    fontSize: '0.92rem',
-    color: isActive ? '#e11d48' : '#374151',
-    padding: '8px 2px',
-    borderBottom: isActive ? '2.5px solid #e11d48' : '2.5px solid transparent',
-    transition: 'all 0.2s ease',
-    whiteSpace: 'nowrap',
-  });
-
-  const mobileLinkStyle = ({ isActive }) => ({
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '12px 14px',
-    borderRadius: 12,
-    textDecoration: 'none',
-    fontWeight: isActive ? 700 : 600,
-    fontSize: '0.95rem',
-    color: isActive ? '#e11d48' : '#1f2937',
-    background: isActive ? '#fff1f2' : 'transparent',
-    transition: 'background 0.15s ease',
-  });
+  const displayPhone = formatVietnamPhone(hotline);
+  const dialHref = `tel:${String(hotline).replace(/[^0-9+]/g, '')}`;
 
   return (
     <>
@@ -125,71 +207,179 @@ export default function Navbar() {
           position: 'sticky',
           top: 0,
           zIndex: 60,
+          boxShadow: '0 2px 12px rgba(15, 23, 42, 0.03)',
         }}
       >
         <style>{`
-          .thx-nav-bar {
+          .thx-top-utility {
+            background: #fffafb;
+            border-bottom: 1px solid #fce7f3;
+            font-size: 0.78rem;
+            color: #4b5563;
+          }
+          .thx-top-utility-inner {
             display: flex;
             align-items: center;
             justify-content: space-between;
+            height: 34px;
             gap: 12px;
-            height: 70px;
           }
-          .thx-desktop-search {
+          .thx-util-links {
             display: flex;
             align-items: center;
-            position: relative;
-            width: 210px;
-            flex-shrink: 1;
+            gap: 16px;
           }
-          .thx-desktop-nav {
-            display: flex;
+          .thx-util-item {
+            display: inline-flex;
             align-items: center;
-            gap: 18px;
+            gap: 5px;
+            color: #374151;
+            text-decoration: none;
+            font-weight: 500;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            font-size: 0.78rem;
           }
-          .thx-desktop-actions {
+          .thx-util-item:hover {
+            color: #e11d48;
+          }
+          .thx-main-header-row {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            gap: 16px;
+            height: 74px;
+          }
+          .thx-header-tagline {
             display: flex;
             align-items: center;
             gap: 8px;
+            font-size: 0.8rem;
+            color: #6b7280;
           }
-          .thx-mobile-actions {
-            display: none;
+          .thx-header-right-tools {
+            display: flex;
             align-items: center;
-            gap: 8px;
+            justify-content: flex-end;
+            gap: 10px;
           }
-          .thx-icon-square-btn {
+          .thx-search-box {
             position: relative;
+            width: 240px;
+          }
+          .thx-pink-cart-btn {
+            position: relative;
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: #e11d48;
+            color: #ffffff;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 38px;
-            height: 38px;
-            border-radius: 11px;
-            border: 1px solid #e5e7eb;
-            background: #ffffff;
-            color: #1f2937;
             text-decoration: none;
-            cursor: pointer;
+            flex-shrink: 0;
+            transition: background 0.15s ease;
           }
-          .thx-cart-badge {
+          .thx-pink-cart-btn:hover {
+            background: #be123c;
+          }
+          .thx-pink-cart-badge {
             position: absolute;
-            top: -5px;
-            right: -5px;
-            min-width: 18px;
-            height: 18px;
+            top: -6px;
+            right: -6px;
+            min-width: 19px;
+            height: 19px;
             padding: 0 5px;
             border-radius: 999px;
-            font-size: 0.68rem;
+            background: #ffffff;
+            color: #e11d48;
+            border: 1.5px solid #e11d48;
+            font-size: 0.7rem;
             font-weight: 800;
             display: flex;
             align-items: center;
             justify-content: center;
             line-height: 1;
-            border: 1.5px solid #ffffff;
           }
-          .thx-mobile-search-bar {
+          .thx-cat-bar-wrap {
+            border-top: 1px solid #f3f4f6;
+            background: #ffffff;
+          }
+          .thx-cat-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 26px;
+            height: 44px;
+          }
+          .thx-cat-item {
+            position: relative;
+            height: 100%;
+            display: flex;
+            align-items: center;
+          }
+          .thx-cat-trigger {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            height: 100%;
+            background: transparent;
+            border: none;
+            border-bottom: 2.5px solid transparent;
+            font-size: 0.81rem;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            color: #1f2937;
+            cursor: pointer;
+            padding: 0 2px;
+            white-space: nowrap;
+            transition: all 0.15s ease;
+          }
+          .thx-cat-trigger:hover,
+          .thx-cat-trigger.active {
+            color: #e11d48;
+            border-bottom-color: #e11d48;
+          }
+          .thx-cat-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            min-width: 245px;
+            background: #ffffff;
+            border: 1px solid #f3f4f6;
+            border-top: 2px solid #e11d48;
+            box-shadow: 0 14px 32px rgba(15, 23, 42, 0.12);
+            padding: 6px 0;
+            z-index: 80;
+            animation: thxDropFade 0.14s ease-out;
+          }
+          .thx-cat-sub-btn {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 10px 16px;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid #f9fafb;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #374151;
+            cursor: pointer;
+            transition: all 0.14s ease;
+          }
+          .thx-cat-sub-btn:last-child {
+            border-bottom: none;
+          }
+          .thx-cat-sub-btn:hover {
+            background: #fff1f2;
+            color: #e11d48;
+            padding-left: 20px;
+          }
+          .thx-mobile-header-bar {
             display: none;
-            padding: 0 0 12px;
           }
           .thx-overlay-backdrop {
             position: fixed;
@@ -197,73 +387,290 @@ export default function Navbar() {
             background: rgba(15, 23, 42, 0.45);
             backdrop-filter: blur(2px);
             z-index: 98;
-            animation: thxFadeIn 0.18s ease-out;
           }
           .thx-overlay-drawer {
             position: fixed;
             top: 0;
             right: 0;
             bottom: 0;
-            width: min(310px, 84vw);
+            width: min(320px, 85vw);
             background: #ffffff;
             z-index: 99;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             padding: 16px;
+            overflow-y: auto;
             box-shadow: -12px 0 36px rgba(15, 23, 42, 0.16);
-            animation: thxSlideInRight 0.22s ease-out;
           }
-          @keyframes thxFadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-          }
-          @keyframes thxSlideInRight {
-            from { transform: translateX(100%); }
-            to { transform: translateX(0); }
+          @keyframes thxDropFade {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
           }
 
-          @media (max-width: 1024px) {
-            .thx-desktop-search {
-              width: 170px;
-            }
-          }
-
-          @media (max-width: 900px) {
-            .thx-nav-bar {
-              height: 60px;
-            }
-            .thx-desktop-search,
-            .thx-desktop-nav,
-            .thx-desktop-actions {
+          @media (max-width: 960px) {
+            .thx-top-utility,
+            .thx-main-header-row,
+            .thx-cat-bar-wrap {
               display: none;
             }
-            .thx-mobile-actions {
+            .thx-mobile-header-bar {
               display: flex;
-            }
-            .thx-mobile-search-bar {
-              display: block;
+              align-items: center;
+              justify-content: space-between;
+              height: 60px;
+              gap: 10px;
             }
           }
         `}</style>
 
-        <div className="container thx-nav-bar">
-          {/* Logo thương hiệu */}
+        {/* 1. Thanh tiện ích trên cùng (Desktop) */}
+        <div className="thx-top-utility">
+          <div className="container thx-top-utility-inner">
+            <a
+              href={dialHref}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                color: '#be123c',
+                fontWeight: 700,
+                textDecoration: 'none',
+              }}
+            >
+              <Phone size={13} />
+              <span>HOTLINE: {displayPhone}</span>
+            </a>
+
+            <div className="thx-util-links">
+              {isAdmin && (
+                <Link
+                  to="/admin"
+                  className="thx-util-item"
+                  style={{ color: '#e11d48', fontWeight: 700 }}
+                >
+                  <LayoutDashboard size={13} />
+                  <span>Quản trị &amp; AI Dự báo</span>
+                </Link>
+              )}
+
+              {!isAdmin && (
+                <button type="button" onClick={openChatBox} className="thx-util-item">
+                  <MessageCircle size={13} color="#e11d48" />
+                  <span>Nhắn tin Admin</span>
+                </button>
+              )}
+
+              {user && !isAdmin && (
+                <Link to="/my-orders" className="thx-util-item">
+                  <ClipboardList size={13} />
+                  <span>Đơn hàng của tôi</span>
+                </Link>
+              )}
+
+              {!isAdmin && (
+                <Link to="/cart" className="thx-util-item">
+                  <ShoppingCart size={13} />
+                  <span>Giỏ hàng ({cartCount})</span>
+                </Link>
+              )}
+
+              {user ? (
+                <>
+                  <span className="thx-util-item" style={{ cursor: 'default', fontWeight: 700 }}>
+                    {isAdmin ? <ShieldCheck size={13} color="#e11d48" /> : <User size={13} />}
+                    <span>{isAdmin ? 'Quản trị viên' : user.hoTen || user.email}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="thx-util-item"
+                    style={{ color: '#e11d48' }}
+                  >
+                    <LogOut size={13} />
+                    <span>Đăng xuất</span>
+                  </button>
+                </>
+              ) : (
+                <Link to="/login" className="thx-util-item" style={{ fontWeight: 700 }}>
+                  <LogIn size={13} />
+                  <span>Tài khoản / Đăng nhập</span>
+                </Link>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* 2. Hàng thương hiệu giữa + Ô tìm kiếm & Giỏ hàng hồng bên phải (Desktop) */}
+        <div className="container thx-main-header-row">
+          <div className="thx-header-tagline">
+            <span
+              style={{
+                background: '#fff1f2',
+                color: '#be123c',
+                padding: '4px 10px',
+                borderRadius: 999,
+                fontWeight: 700,
+                fontSize: '0.74rem',
+              }}
+            >
+              Giao hoa nhanh 2H &bull; Tặng thiệp miễn phí
+            </span>
+          </div>
+
+          <Link
+            to="/"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 10,
+              textDecoration: 'none',
+            }}
+          >
+            <div
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: '50%',
+                border: '2px solid #e11d48',
+                background: '#fff1f2',
+                color: '#e11d48',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Flower2 size={22} />
+            </div>
+            <div style={{ textAlign: 'left' }}>
+              <div
+                style={{
+                  fontWeight: 800,
+                  fontSize: '1.35rem',
+                  color: '#e11d48',
+                  letterSpacing: '0.03em',
+                  lineHeight: 1.1,
+                }}
+              >
+                TIỆM HOA XINH
+              </div>
+              <div
+                style={{
+                  fontSize: '0.73rem',
+                  color: '#6b7280',
+                  fontStyle: 'italic',
+                }}
+              >
+                Say it with Fresh Flowers &amp; Smart AI
+              </div>
+            </div>
+          </Link>
+
+          <div className="thx-header-right-tools">
+            <form onSubmit={handleSearchSubmit} className="thx-search-box">
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Tìm kiếm mẫu hoa..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  height: 38,
+                  paddingRight: 36,
+                  fontSize: '0.85rem',
+                  borderRadius: 10,
+                  background: '#f9fafb',
+                }}
+              />
+              <button
+                type="submit"
+                aria-label="Tìm kiếm"
+                style={{
+                  position: 'absolute',
+                  right: 8,
+                  top: 7,
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#6b7280',
+                  cursor: 'pointer',
+                }}
+              >
+                <Search size={17} />
+              </button>
+            </form>
+
+            {!isAdmin && (
+              <Link
+                to="/cart"
+                className="thx-pink-cart-btn"
+                title="Giỏ hàng của bạn"
+                aria-label={`Giỏ hàng (${cartCount} sản phẩm)`}
+              >
+                <ShoppingCart size={19} />
+                <span className="thx-pink-cart-badge">{cartCount}</span>
+              </Link>
+            )}
+          </div>
+        </div>
+
+        {/* 3. Thanh danh mục ngang chuẩn mẫu (Desktop) */}
+        <nav className="thx-cat-bar-wrap" aria-label="Danh mục hoa tươi">
+          <div className="container thx-cat-bar">
+            {STORE_CATEGORY_MENU.map((cat) => {
+              const isSelected =
+                location.pathname === '/' && activeCat === cat.id;
+              return (
+                <div
+                  key={cat.id || 'all'}
+                  className="thx-cat-item"
+                  onMouseEnter={() => setHoveredCat(cat.id)}
+                  onMouseLeave={() => setHoveredCat(null)}
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleSelectCategory(cat.id)}
+                    className={`thx-cat-trigger ${isSelected ? 'active' : ''}`}
+                  >
+                    <span>{cat.label}</span>
+                    {cat.subItems.length > 0 && <ChevronDown size={13} />}
+                  </button>
+
+                  {cat.subItems.length > 0 && hoveredCat === cat.id && (
+                    <div className="thx-cat-dropdown">
+                      {cat.subItems.map((sub) => (
+                        <button
+                          key={sub.label}
+                          type="button"
+                          onClick={() => handleSelectCategory(cat.id, sub)}
+                          className="thx-cat-sub-btn"
+                        >
+                          {sub.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </nav>
+
+        {/* 4. Thanh Header gọn 1 hàng trên điện thoại */}
+        <div className="container thx-mobile-header-bar">
           <Link
             to="/"
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 9,
+              gap: 8,
               textDecoration: 'none',
-              flexShrink: 0,
             }}
           >
             <div
               style={{
-                width: 36,
-                height: 36,
-                borderRadius: 11,
+                width: 34,
+                height: 34,
+                borderRadius: 10,
                 background: '#e11d48',
                 color: '#ffffff',
                 display: 'flex',
@@ -271,206 +678,55 @@ export default function Navbar() {
                 justifyContent: 'center',
               }}
             >
-              <Flower2 size={20} />
+              <Flower2 size={19} />
             </div>
             <div>
               <div
                 style={{
                   fontWeight: 800,
-                  fontSize: '1.05rem',
-                  color: '#be123c',
+                  fontSize: '1.02rem',
+                  color: '#e11d48',
                   lineHeight: 1.15,
                 }}
               >
                 Tiệm Hoa Xinh
               </div>
-              <div style={{ fontSize: '0.68rem', color: '#6b7280' }}>
+              <div style={{ fontSize: '0.67rem', color: '#6b7280' }}>
                 Fresh Floral &amp; Smart AI
               </div>
             </div>
           </Link>
 
-          {/* Thanh tìm kiếm trên máy tính */}
-          <form onSubmit={handleSearchSubmit} className="thx-desktop-search">
-            <Search
-              size={15}
-              color="#9ca3af"
-              style={{ position: 'absolute', left: 11, pointerEvents: 'none' }}
-            />
-            <input
-              type="text"
-              className="form-control"
-              placeholder="Tìm hoa hồng, tulip..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{
-                height: 36,
-                paddingLeft: 32,
-                paddingRight: 10,
-                fontSize: '0.84rem',
-                borderRadius: 999,
-                background: '#f9fafb',
-              }}
-            />
-          </form>
-
-          {/* Menu điều hướng trên máy tính */}
-          <nav className="thx-desktop-nav">
-            <NavLink to="/" end style={navLinkStyle}>
-              Trang chủ
-            </NavLink>
-
-            <NavLink to="/shop" style={navLinkStyle}>
-              Bộ sưu tập hoa
-            </NavLink>
-
-            {user && !isAdmin && (
-              <NavLink to="/my-orders" style={navLinkStyle}>
-                Đơn hàng của tôi
-              </NavLink>
-            )}
-
-            {!isAdmin && (
-              <button
-                type="button"
-                onClick={openChatBox}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#e11d48',
-                  fontWeight: 600,
-                  fontSize: '0.92rem',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  cursor: 'pointer',
-                  padding: '8px 2px',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                <MessageCircle size={16} />
-                <span>Nhắn tin Admin</span>
-              </button>
-            )}
-
-            {isAdmin && (
-              <NavLink to="/admin" style={navLinkStyle}>
-                Quản trị &amp; AI Dự báo
-              </NavLink>
-            )}
-          </nav>
-
-          {/* Cụm nút tài khoản & giỏ hàng trên máy tính */}
-          <div className="thx-desktop-actions">
-            {!isAdmin && (
-              <Link
-                to="/cart"
-                className="btn btn-outline btn-sm"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
-              >
-                <ShoppingCart size={16} />
-                <span>Giỏ hàng</span>
-                <span
-                  style={{
-                    background: cartCount > 0 ? '#e11d48' : '#f3f4f6',
-                    color: cartCount > 0 ? '#ffffff' : '#6b7280',
-                    fontSize: '0.72rem',
-                    fontWeight: 700,
-                    borderRadius: 999,
-                    padding: '1px 7px',
-                    marginLeft: 2,
-                  }}
-                >
-                  {cartCount}
-                </span>
-              </Link>
-            )}
-
-            {user ? (
-              <>
-                {isAdmin ? (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '6px 12px',
-                      borderRadius: 999,
-                      background: '#fff1f2',
-                      border: '1px solid #fecdd3',
-                      color: '#be123c',
-                      fontSize: '0.84rem',
-                      fontWeight: 700,
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    <ShieldCheck size={15} />
-                    <span>Quản trị viên</span>
-                  </span>
-                ) : (
-                  <Link
-                    to="/my-orders"
-                    className="btn btn-outline btn-sm"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                  >
-                    <User size={15} />
-                    <span>{user.hoTen || user.email || 'Khách hàng'}</span>
-                  </Link>
-                )}
-
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="btn btn-outline btn-sm"
-                  title="Đăng xuất"
-                  style={{ padding: '7px 10px' }}
-                >
-                  <LogOut size={16} />
-                </button>
-              </>
-            ) : (
-              <Link
-                to="/login"
-                className="btn btn-primary btn-sm"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              >
-                <LogIn size={15} />
-                <span>Đăng nhập</span>
-              </Link>
-            )}
-          </div>
-
-          {/* Thanh hành động gọn 1 hàng trên điện thoại */}
-          <div className="thx-mobile-actions">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
               type="button"
               onClick={() => setMobileSearchOpen((v) => !v)}
-              className="thx-icon-square-btn"
-              aria-label="Tìm kiếm sản phẩm"
+              aria-label="Tìm kiếm"
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                border: '1px solid #e5e7eb',
+                background: '#ffffff',
+                color: '#1f2937',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+              }}
             >
-              <Search size={18} />
+              <Search size={17} />
             </button>
 
             {!isAdmin && (
               <Link
                 to="/cart"
-                className="thx-icon-square-btn"
-                aria-label={`Giỏ hàng (${cartCount} sản phẩm)`}
+                className="thx-pink-cart-btn"
+                style={{ width: 36, height: 36 }}
+                aria-label={`Giỏ hàng (${cartCount})`}
               >
-                <ShoppingCart size={18} />
-                <span
-                  className="thx-cart-badge"
-                  style={{
-                    background: cartCount > 0 ? '#e11d48' : '#6b7280',
-                    color: '#ffffff',
-                  }}
-                >
-                  {cartCount}
-                </span>
+                <ShoppingCart size={17} />
+                <span className="thx-pink-cart-badge">{cartCount}</span>
               </Link>
             )}
 
@@ -478,60 +734,43 @@ export default function Navbar() {
               <Link
                 to="/admin"
                 className="btn btn-primary btn-sm"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  padding: '6px 10px',
-                  fontSize: '0.8rem',
-                }}
+                style={{ padding: '6px 10px', fontSize: '0.78rem' }}
               >
-                <LayoutDashboard size={15} />
-                <span>Quản trị</span>
-              </Link>
-            )}
-
-            {!user && (
-              <Link
-                to="/login"
-                className="btn btn-primary btn-sm"
-                style={{ padding: '6px 10px', fontSize: '0.8rem' }}
-              >
-                Đăng nhập
+                Quản trị
               </Link>
             )}
 
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              aria-label="Mở menu điều hướng"
+              aria-label="Mở danh mục"
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 38,
-                height: 38,
-                borderRadius: 11,
+                width: 36,
+                height: 36,
+                borderRadius: 10,
                 border: '1px solid #fecdd3',
                 background: '#fffafb',
                 color: '#be123c',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 cursor: 'pointer',
               }}
             >
-              <Menu size={19} />
+              <Menu size={18} />
             </button>
           </div>
         </div>
 
         {/* Thanh tìm kiếm mở nhanh trên điện thoại */}
         {mobileSearchOpen && (
-          <div className="container thx-mobile-search-bar">
+          <div className="container" style={{ paddingBottom: 12 }}>
             <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: 8 }}>
               <input
                 type="text"
                 autoFocus
                 className="form-control"
-                placeholder="Nhập tên hoa cần tìm (hồng, hướng dương...)"
+                placeholder="Nhập tên hoa cần tìm..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={{ height: 38, fontSize: '0.88rem' }}
@@ -544,7 +783,7 @@ export default function Navbar() {
         )}
       </header>
 
-      {/* Overlay Drawer trượt đè lên nội dung kèm lớp phủ tối mờ */}
+      {/* Ngăn kéo danh mục & tài khoản trên điện thoại (Overlay Drawer) */}
       {mobileMenuOpen && (
         <>
           <div
@@ -553,100 +792,201 @@ export default function Navbar() {
             aria-hidden="true"
           />
 
-          <aside className="thx-overlay-drawer" aria-label="Menu điều hướng di động">
+          <aside className="thx-overlay-drawer" aria-label="Danh mục hoa di động">
             <div>
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  paddingBottom: 14,
-                  marginBottom: 12,
+                  paddingBottom: 12,
+                  marginBottom: 10,
                   borderBottom: '1px solid #f3f4f6',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 9,
-                      background: '#e11d48',
-                      color: '#ffffff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Flower2 size={18} />
-                  </div>
-                  <span style={{ fontWeight: 800, fontSize: '1rem', color: '#be123c' }}>
-                    Tiệm Hoa Xinh
-                  </span>
-                </div>
-
+                <span style={{ fontWeight: 800, fontSize: '1rem', color: '#e11d48' }}>
+                  DANH MỤC HOA TƯƠI
+                </span>
                 <button
                   type="button"
                   onClick={() => setMobileMenuOpen(false)}
-                  aria-label="Đóng menu"
                   style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 10,
+                    width: 32,
+                    height: 32,
+                    borderRadius: 9,
                     border: '1px solid #e5e7eb',
                     background: '#ffffff',
-                    color: '#374151',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
                   }}
                 >
-                  <X size={18} />
+                  <X size={17} />
                 </button>
               </div>
 
-              <nav style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <NavLink to="/" end style={mobileLinkStyle}>
-                  <span>Trang chủ</span>
-                  <ChevronRight size={16} opacity={0.5} />
-                </NavLink>
+              {/* Danh sách danh mục hoa (có xổ nhánh con) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {STORE_CATEGORY_MENU.map((cat) => {
+                  const isExpanded = expandedMobileCat === cat.id;
+                  const isSelected = activeCat === cat.id;
+                  return (
+                    <div key={cat.id || 'm-all'}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          borderRadius: 10,
+                          background: isSelected ? '#fff1f2' : 'transparent',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleSelectCategory(cat.id)}
+                          style={{
+                            flex: 1,
+                            textAlign: 'left',
+                            padding: '10px 12px',
+                            background: 'transparent',
+                            border: 'none',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            color: isSelected ? '#e11d48' : '#1f2937',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {cat.label}
+                        </button>
 
-                <NavLink to="/shop" style={mobileLinkStyle}>
-                  <span>Bộ sưu tập hoa</span>
-                  <ChevronRight size={16} opacity={0.5} />
-                </NavLink>
+                        {cat.subItems.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedMobileCat(isExpanded ? '' : cat.id)
+                            }
+                            style={{
+                              padding: '10px 12px',
+                              background: 'transparent',
+                              border: 'none',
+                              color: '#6b7280',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <ChevronDown
+                              size={16}
+                              style={{
+                                transform: isExpanded ? 'rotate(180deg)' : 'none',
+                                transition: 'transform 0.15s ease',
+                              }}
+                            />
+                          </button>
+                        )}
+                      </div>
 
+                      {cat.subItems.length > 0 && isExpanded && (
+                        <div
+                          style={{
+                            paddingLeft: 14,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 2,
+                            marginBottom: 6,
+                          }}
+                        >
+                          {cat.subItems.map((sub) => (
+                            <button
+                              key={sub.label}
+                              type="button"
+                              onClick={() => handleSelectCategory(cat.id, sub)}
+                              style={{
+                                textAlign: 'left',
+                                padding: '8px 10px',
+                                background: '#fafafa',
+                                border: 'none',
+                                borderRadius: 8,
+                                fontSize: '0.78rem',
+                                fontWeight: 600,
+                                color: '#4b5563',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              • {sub.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Liên kết đơn hàng & Nhắn tin Admin */}
+              <div
+                style={{
+                  marginTop: 14,
+                  paddingTop: 12,
+                  borderTop: '1px solid #f3f4f6',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
                 {user && !isAdmin && (
-                  <NavLink to="/my-orders" style={mobileLinkStyle}>
+                  <Link
+                    to="/my-orders"
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: '1px solid #e5e7eb',
+                      textDecoration: 'none',
+                      color: '#1f2937',
+                      fontWeight: 600,
+                      fontSize: '0.88rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <ClipboardList size={16} color="#e11d48" />
                     <span>Đơn hàng của tôi</span>
-                    <ChevronRight size={16} opacity={0.5} />
-                  </NavLink>
+                  </Link>
                 )}
 
                 {isAdmin && (
-                  <NavLink to="/admin" style={mobileLinkStyle}>
+                  <Link
+                    to="/admin"
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      background: '#e11d48',
+                      textDecoration: 'none',
+                      color: '#ffffff',
+                      fontWeight: 700,
+                      fontSize: '0.88rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <LayoutDashboard size={16} />
                     <span>Quản trị &amp; AI Dự báo</span>
-                    <ChevronRight size={16} opacity={0.5} />
-                  </NavLink>
+                  </Link>
                 )}
-              </nav>
 
-              {/* Nút Nhắn tin với Admin dạng viền mảnh (tách biệt rõ với trạng thái Active State) */}
-              {!isAdmin && (
-                <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed #f3f4f6' }}>
+                {!isAdmin && (
                   <button
                     type="button"
                     onClick={openChatBox}
                     style={{
-                      width: '100%',
-                      padding: '11px 14px',
-                      borderRadius: 12,
+                      padding: '10px 12px',
+                      borderRadius: 10,
                       border: '1.5px solid #fecdd3',
                       background: '#ffffff',
                       color: '#be123c',
                       fontWeight: 700,
-                      fontSize: '0.92rem',
+                      fontSize: '0.88rem',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -654,21 +994,22 @@ export default function Navbar() {
                       cursor: 'pointer',
                     }}
                   >
-                    <MessageCircle size={17} color="#e11d48" />
+                    <MessageCircle size={16} color="#e11d48" />
                     <span>Nhắn tin tư vấn với Admin</span>
                   </button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
-            {/* Chân ngăn kéo: Thông tin tài khoản & Đăng xuất */}
+            {/* Chân ngăn kéo: Tài khoản & Đăng xuất */}
             <div
               style={{
-                paddingTop: 14,
+                paddingTop: 12,
+                marginTop: 14,
                 borderTop: '1px solid #f3f4f6',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 10,
+                gap: 8,
               }}
             >
               {user ? (
@@ -677,20 +1018,15 @@ export default function Navbar() {
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 9,
+                      gap: 8,
                       padding: '8px 10px',
                       borderRadius: 10,
                       background: '#f9fafb',
-                      fontSize: '0.88rem',
+                      fontSize: '0.85rem',
                       fontWeight: 700,
-                      color: '#111827',
                     }}
                   >
-                    {isAdmin ? (
-                      <ShieldCheck size={17} color="#e11d48" />
-                    ) : (
-                      <User size={17} color="#e11d48" />
-                    )}
+                    <User size={16} color="#e11d48" />
                     <span
                       style={{
                         overflow: 'hidden',
@@ -698,23 +1034,14 @@ export default function Navbar() {
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {isAdmin
-                        ? 'Tài khoản Quản trị viên'
-                        : user.hoTen || user.email || 'Khách hàng'}
+                      {isAdmin ? 'Quản trị viên' : user.hoTen || user.email}
                     </span>
                   </div>
-
                   <button
                     type="button"
                     onClick={handleLogout}
                     className="btn btn-outline btn-sm"
-                    style={{
-                      width: '100%',
-                      justifyContent: 'center',
-                      color: '#e11d48',
-                      borderColor: '#fecdd3',
-                      background: '#ffffff',
-                    }}
+                    style={{ width: '100%', justifyContent: 'center', color: '#e11d48' }}
                   >
                     <LogOut size={15} />
                     <span>Đăng xuất</span>
