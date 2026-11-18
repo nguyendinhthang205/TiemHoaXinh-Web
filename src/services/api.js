@@ -70,18 +70,44 @@ async function getSharedCloudBin(forceFresh = false) {
   return inFlightCloudGet;
 }
 
+// Dọn các dữ liệu phụ cũ trước, luôn ưu tiên giữ lại hình ảnh sản phẩm mới nhất
 function compactCloudBin(rawBin) {
   const safeBin =
     rawBin && typeof rawBin === 'object' && !Array.isArray(rawBin) ? { ...rawBin } : {};
+
+  // 1. Giới hạn tối đa 150 bản ghi trạng thái đơn gần nhất để tiết kiệm dung lượng
+  if (
+    safeBin.__order_meta__ &&
+    typeof safeBin.__order_meta__ === 'object' &&
+    !Array.isArray(safeBin.__order_meta__)
+  ) {
+    const orderEntries = Object.entries(safeBin.__order_meta__).sort(
+      (a, b) => Number(b[1]?.updatedAt || 0) - Number(a[1]?.updatedAt || 0)
+    );
+    if (orderEntries.length > 150) {
+      safeBin.__order_meta__ = Object.fromEntries(orderEntries.slice(0, 150));
+    }
+  }
+
+  // 2. Xử lý danh sách ảnh/thông tin sản phẩm: không lưu trùng base64 ở khóa name:
   const overrides = safeBin.__product_overrides__;
   if (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) {
     const entries = Object.entries(overrides).sort(
       (a, b) => Number(b[1]?.updatedAt || 0) - Number(a[1]?.updatedAt || 0)
     );
     const kept = {};
-    for (const [k, val] of entries) {
-      kept[k] = val;
-      if (JSON.stringify(safeBin).length > 72000) {
+    for (let i = 0; i < entries.length; i += 1) {
+      const [k, val] = entries[i];
+      if (!val || typeof val !== 'object') continue;
+      const itemCopy = { ...val };
+
+      if (k.startsWith('name:') && itemCopy.hinhAnhChinh?.startsWith('data:image/')) {
+        delete itemCopy.hinhAnhChinh;
+      }
+
+      kept[k] = itemCopy;
+      const testBin = { ...safeBin, __product_overrides__: kept };
+      if (i > 0 && JSON.stringify(testBin).length > 88000) {
         if (kept[k]?.hinhAnhChinh?.startsWith('data:image/')) {
           delete kept[k].hinhAnhChinh;
         }
@@ -89,6 +115,7 @@ function compactCloudBin(rawBin) {
     }
     safeBin.__product_overrides__ = kept;
   }
+
   return safeBin;
 }
 
@@ -102,7 +129,7 @@ async function pushCompactCloudBin(rawBin) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(compacted),
     },
-    6000
+    6500
   );
 }
 
@@ -168,7 +195,6 @@ export async function syncOrderMetaFromCloud() {
     const raw = await getSharedCloudBin(false);
     if (!raw) return localMeta;
     const safeBin = { ...raw };
-    const isOversized = JSON.stringify(safeBin).length > 75000;
     const remoteMeta =
       safeBin.__order_meta__ &&
       typeof safeBin.__order_meta__ === 'object' &&
@@ -178,7 +204,7 @@ export async function syncOrderMetaFromCloud() {
 
     const merged = { ...localMeta };
     let localChanged = false;
-    let shouldPushBack = isOversized;
+    let shouldPushBack = false;
 
     Object.entries(remoteMeta).forEach(([orderId, rItem]) => {
       if (!rItem || typeof rItem !== 'object') return;
@@ -277,7 +303,7 @@ export function getProductOverrides() {
 export async function syncProductOverridesFromCloud() {
   const localOverrides = getProductOverrides();
   try {
-    const raw = await getSharedCloudBin(false);
+    const raw = await getSharedCloudBin(true);
     if (!raw) return localOverrides;
     const safeBin = { ...raw };
     const remoteOverrides =
@@ -306,6 +332,7 @@ export async function syncProductOverridesFromCloud() {
 
     Object.entries(localOverrides).forEach(([key, lItem]) => {
       if (!lItem || typeof lItem !== 'object') return;
+      if (key.startsWith('name:')) return;
       const rItem = remoteOverrides[key];
       const lTime = Number(lItem.updatedAt || 0);
       const rTime = Number(rItem?.updatedAt || 0);
@@ -338,10 +365,15 @@ export async function saveProductOverride(key, patch) {
   const keyStr = String(key);
   const now = Date.now();
 
+  const sanitizedPatch = { ...patch };
+  if (keyStr.startsWith('name:') && sanitizedPatch.hinhAnhChinh?.startsWith('data:image/')) {
+    delete sanitizedPatch.hinhAnhChinh;
+  }
+
   const current = getProductOverrides();
   const nextEntry = {
     ...(current[keyStr] || {}),
-    ...patch,
+    ...sanitizedPatch,
     updatedAt: now,
   };
   current[keyStr] = nextEntry;
@@ -394,11 +426,18 @@ function mergeProductOverride(product) {
     };
   }
 
+  const resolvedImg =
+    byId?.hinhAnhChinh ||
+    byId?.anhChinh ||
+    byName?.hinhAnhChinh ||
+    byName?.anhChinh ||
+    product.anhChinh;
+
   return {
     ...product,
-    anhChinh: matched.hinhAnhChinh || matched.anhChinh || product.anhChinh,
-    hinhAnhChinh: matched.hinhAnhChinh || product.hinhAnhChinh,
-    hinhAnh: matched.hinhAnhChinh || product.hinhAnh,
+    anhChinh: resolvedImg,
+    hinhAnhChinh: resolvedImg || product.hinhAnhChinh,
+    hinhAnh: resolvedImg || product.hinhAnh,
     tongMauSac: matched.tongMauSac || product.tongMauSac,
     maDanhMuc: resolvedCatId,
     tenDanhMuc: resolvedCatName,
@@ -540,7 +579,6 @@ export async function saveProductReview(
     // Bỏ qua
   }
 
-  // Đẩy lên đám mây để mọi tài khoản và thiết bị đều nhìn thấy đánh giá
   getSharedCloudBin(true)
     .then((raw) => {
       const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
@@ -555,7 +593,6 @@ export async function saveProductReview(
     })
     .catch(() => {});
 
-  // Đồng thời gửi tới Backend SQL Server nếu có hỗ trợ
   api
     .post('/DanhGia', {
       maSanPham: Number(maSanPham),
