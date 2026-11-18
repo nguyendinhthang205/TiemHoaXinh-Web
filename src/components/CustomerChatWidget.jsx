@@ -10,6 +10,17 @@ import {
   syncChatsFromCloud,
 } from '../services/chatService';
 
+function formatVietnamPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length === 10) {
+    return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  }
+  if (digits.length === 11) {
+    return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  }
+  return String(raw || '').trim();
+}
+
 export default function CustomerChatWidget() {
   const location = useLocation();
   const appCtx = useApp() || {};
@@ -112,53 +123,27 @@ export default function CustomerChatWidget() {
 
   if (isHidden) return null;
 
+  const dialHref = `tel:${String(hotline).replace(/[^0-9+]/g, '')}`;
+  const displayPhone = formatVietnamPhone(hotline);
+
   return (
     <>
       <style>{`
-        @keyframes thxRainbowBlink {
+        @keyframes thxSoftPulse {
           0% {
-            background-color: #e11d48;
-            box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.7), 0 10px 24px rgba(225, 29, 72, 0.45);
-            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.45), 0 8px 20px rgba(225, 29, 72, 0.28);
           }
-          20% {
-            background-color: #f97316;
-            box-shadow: 0 0 0 8px rgba(249, 115, 22, 0), 0 10px 26px rgba(249, 115, 22, 0.5);
-            transform: scale(1.03);
-          }
-          40% {
-            background-color: #eab308;
-            box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.7), 0 10px 24px rgba(234, 179, 8, 0.45);
-            transform: scale(1);
-          }
-          60% {
-            background-color: #10b981;
-            box-shadow: 0 0 0 8px rgba(16, 185, 129, 0), 0 10px 26px rgba(16, 185, 129, 0.5);
-            transform: scale(1.03);
-          }
-          80% {
-            background-color: #2563eb;
-            box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7), 0 10px 24px rgba(37, 99, 235, 0.45);
-            transform: scale(1);
+          70% {
+            box-shadow: 0 0 0 11px rgba(225, 29, 72, 0), 0 8px 20px rgba(225, 29, 72, 0.28);
           }
           100% {
-            background-color: #9333ea;
-            box-shadow: 0 0 0 8px rgba(147, 51, 234, 0), 0 10px 26px rgba(147, 51, 234, 0.5);
-            transform: scale(1.03);
+            box-shadow: 0 0 0 0 rgba(225, 29, 72, 0), 0 8px 20px rgba(225, 29, 72, 0.28);
           }
-        }
-        @keyframes thxPhoneShake {
-          0%, 100% { transform: rotate(0deg); }
-          15% { transform: rotate(-18deg); }
-          30% { transform: rotate(18deg); }
-          45% { transform: rotate(-14deg); }
-          60% { transform: rotate(14deg); }
-          75% { transform: rotate(-8deg); }
         }
         .thx-chat-box {
           position: fixed;
           right: 22px;
-          bottom: 94px;
+          bottom: 88px;
           width: 350px;
           max-width: calc(100vw - 24px);
           background: #ffffff;
@@ -178,47 +163,52 @@ export default function CustomerChatWidget() {
           display: inline-flex;
           align-items: center;
           gap: 10px;
-          padding: 10px 18px;
+          padding: 9px 16px;
           border-radius: 999px;
+          background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
           color: #ffffff;
           text-decoration: none;
-          border: 2px solid rgba(255, 255, 255, 0.85);
-          animation: thxRainbowBlink 2.4s infinite ease-in-out;
+          border: 2px solid rgba(255, 255, 255, 0.9);
+          animation: thxSoftPulse 2.4s infinite ease-out;
           cursor: pointer;
         }
         .thx-hotline-icon {
-          width: 34px;
-          height: 34px;
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.2);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
         }
-        .thx-hotline-label {
-          font-size: 0.68rem;
-        }
-        .thx-hotline-num {
-          font-size: 0.98rem;
+        .thx-hotline-text {
+          line-height: 1.2;
         }
 
-        @media (max-width: 640px) {
+        @media (max-width: 768px) {
           .thx-chat-box {
             right: 12px;
             left: 12px;
             width: auto;
-            bottom: 70px;
+            bottom: 74px;
           }
           .thx-hotline-btn {
-            right: 12px;
-            bottom: 12px;
-            gap: 8px;
-            padding: 7px 13px;
+            right: 14px;
+            bottom: 16px;
+            width: 48px;
+            height: 48px;
+            padding: 0;
+            justify-content: center;
+            gap: 0;
           }
           .thx-hotline-icon {
-            width: 28px;
-            height: 28px;
+            width: 100%;
+            height: 100%;
+            background: transparent;
           }
-          .thx-hotline-label {
-            font-size: 0.6rem;
-          }
-          .thx-hotline-num {
-            font-size: 0.85rem;
+          .thx-hotline-text {
+            display: none;
           }
         }
       `}</style>
@@ -242,7 +232,7 @@ export default function CustomerChatWidget() {
                   Tư Vấn Trực Tuyến Tiệm Hoa Xinh
                 </div>
                 <div style={{ fontSize: '0.73rem', opacity: 0.9 }}>
-                  Thợ hoa &amp; Admin sẵn sàng hỗ trợ
+                  Hotline: {displayPhone}
                 </div>
               </div>
             </div>
@@ -349,36 +339,27 @@ export default function CustomerChatWidget() {
       )}
 
       <a
-        href={`tel:${String(hotline).replace(/[^0-9+]/g, '')}`}
-        title={`Gọi ngay Hotline ${hotline} để được tư vấn chọn hoa miễn phí`}
+        href={dialHref}
+        aria-label={`Gọi ngay Hotline ${displayPhone}`}
+        title={`Gọi ngay Hotline ${displayPhone}`}
         className="thx-hotline-btn"
       >
-        <span
-          className="thx-hotline-icon"
-          style={{
-            borderRadius: '50%',
-            background: 'rgba(255, 255, 255, 0.24)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            animation: 'thxPhoneShake 1.2s infinite ease-in-out',
-          }}
-        >
-          <PhoneCall size={15} />
+        <span className="thx-hotline-icon">
+          <PhoneCall size={18} />
         </span>
-        <div style={{ lineHeight: 1.2 }}>
+        <div className="thx-hotline-text">
           <div
-            className="thx-hotline-label"
             style={{
+              fontSize: '0.66rem',
               fontWeight: 700,
-              opacity: 0.95,
+              opacity: 0.92,
               letterSpacing: '0.04em',
             }}
           >
             HOTLINE TƯ VẤN
           </div>
-          <div className="thx-hotline-num" style={{ fontWeight: 800 }}>
-            {hotline}
+          <div style={{ fontSize: '0.94rem', fontWeight: 800 }}>
+            {displayPhone}
           </div>
         </div>
       </a>

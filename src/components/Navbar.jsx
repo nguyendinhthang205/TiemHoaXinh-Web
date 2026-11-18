@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   Flower2,
-  ShoppingBag,
+  ShoppingCart,
   User,
   LogOut,
   LogIn,
@@ -11,6 +11,7 @@ import {
   X,
   ShieldCheck,
   LayoutDashboard,
+  ChevronRight,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -38,6 +39,16 @@ export default function Navbar() {
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
+
+  // Khóa cuộn trang nền khi mở Overlay Drawer trên điện thoại
+  useEffect(() => {
+    if (!mobileMenuOpen) return undefined;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [mobileMenuOpen]);
 
   const handleLogout = () => {
     localStorage.removeItem('thx_token');
@@ -79,183 +90,232 @@ export default function Navbar() {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '11px 14px',
+    padding: '12px 14px',
     borderRadius: 12,
     textDecoration: 'none',
     fontWeight: isActive ? 700 : 600,
-    fontSize: '0.94rem',
+    fontSize: '0.95rem',
     color: isActive ? '#e11d48' : '#1f2937',
     background: isActive ? '#fff1f2' : 'transparent',
+    transition: 'background 0.15s ease',
   });
 
   return (
-    <header
-      style={{
-        background: '#ffffff',
-        borderBottom: '1px solid #f3f4f6',
-        position: 'sticky',
-        top: 0,
-        zIndex: 60,
-      }}
-    >
-      <style>{`
-        .thx-nav-bar {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 14px;
-          height: 70px;
-        }
-        .thx-desktop-nav {
-          display: flex;
-          align-items: center;
-          gap: 22px;
-        }
-        .thx-desktop-actions {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-        .thx-mobile-actions {
-          display: none;
-          align-items: center;
-          gap: 8px;
-        }
-        .thx-mobile-drawer {
-          display: none;
-        }
-
-        @media (max-width: 860px) {
+    <>
+      <header
+        style={{
+          background: '#ffffff',
+          borderBottom: '1px solid #f3f4f6',
+          position: 'sticky',
+          top: 0,
+          zIndex: 60,
+        }}
+      >
+        <style>{`
           .thx-nav-bar {
-            height: 62px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            height: 70px;
           }
-          .thx-desktop-nav,
+          .thx-desktop-nav {
+            display: flex;
+            align-items: center;
+            gap: 22px;
+          }
           .thx-desktop-actions {
-            display: none;
+            display: flex;
+            align-items: center;
+            gap: 10px;
           }
           .thx-mobile-actions {
-            display: flex;
+            display: none;
+            align-items: center;
+            gap: 10px;
           }
-          .thx-mobile-drawer {
+          .thx-cart-icon-btn {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 38px;
+            height: 38px;
+            border-radius: 11px;
+            border: 1px solid #e5e7eb;
+            background: #ffffff;
+            color: #1f2937;
+            text-decoration: none;
+          }
+          .thx-cart-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            border-radius: 999px;
+            font-size: 0.68rem;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            border: 1.5px solid #ffffff;
+          }
+          .thx-overlay-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            backdrop-filter: blur(2px);
+            z-index: 98;
+            animation: thxFadeIn 0.18s ease-out;
+          }
+          .thx-overlay-drawer {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: min(310px, 82vw);
+            background: #ffffff;
+            z-index: 99;
             display: flex;
             flex-direction: column;
-            gap: 6px;
-            padding: 12px 16px 18px;
-            background: #ffffff;
-            border-top: 1px solid #f3f4f6;
-            box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+            justify-content: space-between;
+            padding: 16px;
+            box-shadow: -12px 0 36px rgba(15, 23, 42, 0.16);
+            animation: thxSlideInRight 0.22s ease-out;
           }
-        }
-      `}</style>
+          @keyframes thxFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+          @keyframes thxSlideInRight {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+          }
 
-      <div className="container thx-nav-bar">
-        {/* Logo thương hiệu */}
-        <Link
-          to="/"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            textDecoration: 'none',
-            flexShrink: 0,
-          }}
-        >
-          <div
+          @media (max-width: 860px) {
+            .thx-nav-bar {
+              height: 60px;
+            }
+            .thx-desktop-nav,
+            .thx-desktop-actions {
+              display: none;
+            }
+            .thx-mobile-actions {
+              display: flex;
+            }
+          }
+        `}</style>
+
+        <div className="container thx-nav-bar">
+          {/* Logo thương hiệu */}
+          <Link
+            to="/"
             style={{
-              width: 38,
-              height: 38,
-              borderRadius: 11,
-              background: '#e11d48',
-              color: '#ffffff',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
+              gap: 10,
+              textDecoration: 'none',
+              flexShrink: 0,
             }}
           >
-            <Flower2 size={21} />
-          </div>
-          <div>
             <div
               style={{
-                fontWeight: 800,
-                fontSize: '1.1rem',
-                color: '#be123c',
-                lineHeight: 1.15,
-              }}
-            >
-              Tiệm Hoa Xinh
-            </div>
-            <div style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-              Fresh Floral &amp; Smart AI
-            </div>
-          </div>
-        </Link>
-
-        {/* Menu điều hướng trên máy tính */}
-        <nav className="thx-desktop-nav">
-          <NavLink to="/" end style={navLinkStyle}>
-            Trang chủ
-          </NavLink>
-
-          <NavLink to="/shop" style={navLinkStyle}>
-            Bộ sưu tập hoa
-          </NavLink>
-
-          {user && !isAdmin && (
-            <NavLink to="/my-orders" style={navLinkStyle}>
-              Đơn hàng của tôi
-            </NavLink>
-          )}
-
-          {!isAdmin && (
-            <button
-              type="button"
-              onClick={openChatBox}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: '#e11d48',
-                fontWeight: 600,
-                fontSize: '0.94rem',
-                display: 'inline-flex',
+                width: 36,
+                height: 36,
+                borderRadius: 11,
+                background: '#e11d48',
+                color: '#ffffff',
+                display: 'flex',
                 alignItems: 'center',
-                gap: 5,
-                cursor: 'pointer',
-                padding: '8px 4px',
-                whiteSpace: 'nowrap',
+                justifyContent: 'center',
               }}
             >
-              <MessageCircle size={16} />
-              <span>Nhắn tin Admin</span>
-            </button>
-          )}
+              <Flower2 size={20} />
+            </div>
+            <div>
+              <div
+                style={{
+                  fontWeight: 800,
+                  fontSize: '1.08rem',
+                  color: '#be123c',
+                  lineHeight: 1.15,
+                }}
+              >
+                Tiệm Hoa Xinh
+              </div>
+              <div style={{ fontSize: '0.69rem', color: '#6b7280' }}>
+                Fresh Floral &amp; Smart AI
+              </div>
+            </div>
+          </Link>
 
-          {isAdmin && (
-            <NavLink to="/admin" style={navLinkStyle}>
-              Quản trị &amp; AI Dự báo
+          {/* Menu điều hướng trên máy tính */}
+          <nav className="thx-desktop-nav">
+            <NavLink to="/" end style={navLinkStyle}>
+              Trang chủ
             </NavLink>
-          )}
-        </nav>
 
-        {/* Cụm nút tài khoản & giỏ hàng trên máy tính */}
-        <div className="thx-desktop-actions">
-          {!isAdmin && (
-            <Link
-              to="/cart"
-              className="btn btn-outline btn-sm"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              <ShoppingBag size={16} />
-              <span>Giỏ hàng</span>
-              {cartCount > 0 && (
+            <NavLink to="/shop" style={navLinkStyle}>
+              Bộ sưu tập hoa
+            </NavLink>
+
+            {user && !isAdmin && (
+              <NavLink to="/my-orders" style={navLinkStyle}>
+                Đơn hàng của tôi
+              </NavLink>
+            )}
+
+            {!isAdmin && (
+              <button
+                type="button"
+                onClick={openChatBox}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#e11d48',
+                  fontWeight: 600,
+                  fontSize: '0.94rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  cursor: 'pointer',
+                  padding: '8px 4px',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <MessageCircle size={16} />
+                <span>Nhắn tin Admin</span>
+              </button>
+            )}
+
+            {isAdmin && (
+              <NavLink to="/admin" style={navLinkStyle}>
+                Quản trị &amp; AI Dự báo
+              </NavLink>
+            )}
+          </nav>
+
+          {/* Cụm nút tài khoản & giỏ hàng trên máy tính */}
+          <div className="thx-desktop-actions">
+            {!isAdmin && (
+              <Link
+                to="/cart"
+                className="btn btn-outline btn-sm"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <ShoppingCart size={16} />
+                <span>Giỏ hàng</span>
                 <span
                   style={{
-                    background: '#e11d48',
-                    color: '#ffffff',
+                    background: cartCount > 0 ? '#e11d48' : '#f3f4f6',
+                    color: cartCount > 0 ? '#ffffff' : '#6b7280',
                     fontSize: '0.72rem',
                     fontWeight: 700,
                     borderRadius: 999,
@@ -265,240 +325,298 @@ export default function Navbar() {
                 >
                   {cartCount}
                 </span>
-              )}
-            </Link>
-          )}
+              </Link>
+            )}
 
-          {user ? (
-            <>
-              {isAdmin ? (
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '6px 12px',
-                    borderRadius: 999,
-                    background: '#fff1f2',
-                    border: '1px solid #fecdd3',
-                    color: '#be123c',
-                    fontSize: '0.84rem',
-                    fontWeight: 700,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  <ShieldCheck size={15} />
-                  <span>Quản trị viên</span>
-                </span>
-              ) : (
-                <Link
-                  to="/my-orders"
-                  className="btn btn-outline btn-sm"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                >
-                  <User size={15} />
-                  <span>{user.hoTen || user.email || 'Khách hàng'}</span>
-                </Link>
-              )}
-
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="btn btn-outline btn-sm"
-                title="Đăng xuất"
-                style={{ padding: '7px 10px' }}
-              >
-                <LogOut size={16} />
-              </button>
-            </>
-          ) : (
-            <Link
-              to="/login"
-              className="btn btn-primary btn-sm"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            >
-              <LogIn size={15} />
-              <span>Đăng nhập</span>
-            </Link>
-          )}
-        </div>
-
-        {/* Thanh hành động gọn 1 hàng trên điện thoại */}
-        <div className="thx-mobile-actions">
-          {!isAdmin && (
-            <Link
-              to="/cart"
-              className="btn btn-outline btn-sm"
-              aria-label="Giỏ hàng"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '6px 10px',
-              }}
-            >
-              <ShoppingBag size={16} />
-              {cartCount > 0 && (
-                <span
-                  style={{
-                    background: '#e11d48',
-                    color: '#ffffff',
-                    fontSize: '0.7rem',
-                    fontWeight: 700,
-                    borderRadius: 999,
-                    padding: '1px 6px',
-                  }}
-                >
-                  {cartCount}
-                </span>
-              )}
-            </Link>
-          )}
-
-          {isAdmin && (
-            <Link
-              to="/admin"
-              className="btn btn-primary btn-sm"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '6px 10px',
-                fontSize: '0.8rem',
-              }}
-            >
-              <LayoutDashboard size={15} />
-              <span>Quản trị</span>
-            </Link>
-          )}
-
-          {!user && (
-            <Link
-              to="/login"
-              className="btn btn-primary btn-sm"
-              style={{ padding: '6px 11px', fontSize: '0.82rem' }}
-            >
-              Đăng nhập
-            </Link>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen((prev) => !prev)}
-            className="btn btn-outline btn-sm"
-            aria-label="Mở menu điều hướng"
-            style={{ padding: '6px 9px' }}
-          >
-            {mobileMenuOpen ? <X size={19} /> : <Menu size={19} />}
-          </button>
-        </div>
-      </div>
-
-      {/* Ngăn menu thả xuống gọn gàng trên điện thoại */}
-      {mobileMenuOpen && (
-        <div className="thx-mobile-drawer">
-          <NavLink to="/" end style={mobileLinkStyle}>
-            <span>Trang chủ</span>
-          </NavLink>
-
-          <NavLink to="/shop" style={mobileLinkStyle}>
-            <span>Bộ sưu tập hoa</span>
-          </NavLink>
-
-          {user && !isAdmin && (
-            <NavLink to="/my-orders" style={mobileLinkStyle}>
-              <span>Đơn hàng của tôi</span>
-            </NavLink>
-          )}
-
-          {!isAdmin && (
-            <button
-              type="button"
-              onClick={openChatBox}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '11px 14px',
-                borderRadius: 12,
-                border: 'none',
-                background: '#fff1f2',
-                color: '#e11d48',
-                fontWeight: 700,
-                fontSize: '0.94rem',
-                cursor: 'pointer',
-                textAlign: 'left',
-              }}
-            >
-              <MessageCircle size={17} />
-              <span>Nhắn tin tư vấn với Admin</span>
-            </button>
-          )}
-
-          {isAdmin && (
-            <NavLink to="/admin" style={mobileLinkStyle}>
-              <span>Quản trị &amp; AI Dự báo</span>
-            </NavLink>
-          )}
-
-          <div
-            style={{
-              marginTop: 6,
-              paddingTop: 10,
-              borderTop: '1px solid #f3f4f6',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 10,
-            }}
-          >
             {user ? (
               <>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    fontSize: '0.88rem',
-                    fontWeight: 700,
-                    color: '#111827',
-                  }}
-                >
-                  {isAdmin ? (
-                    <ShieldCheck size={17} color="#e11d48" />
-                  ) : (
-                    <User size={17} color="#e11d48" />
-                  )}
-                  <span>
-                    {isAdmin
-                      ? 'Tài khoản Quản trị viên'
-                      : user.hoTen || user.email || 'Khách hàng'}
+                {isAdmin ? (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 12px',
+                      borderRadius: 999,
+                      background: '#fff1f2',
+                      border: '1px solid #fecdd3',
+                      color: '#be123c',
+                      fontSize: '0.84rem',
+                      fontWeight: 700,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <ShieldCheck size={15} />
+                    <span>Quản trị viên</span>
                   </span>
-                </div>
+                ) : (
+                  <Link
+                    to="/my-orders"
+                    className="btn btn-outline btn-sm"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <User size={15} />
+                    <span>{user.hoTen || user.email || 'Khách hàng'}</span>
+                  </Link>
+                )}
 
                 <button
                   type="button"
                   onClick={handleLogout}
                   className="btn btn-outline btn-sm"
-                  style={{ color: '#e11d48', borderColor: '#fecdd3' }}
+                  title="Đăng xuất"
+                  style={{ padding: '7px 10px' }}
                 >
-                  <LogOut size={15} />
-                  <span>Đăng xuất</span>
+                  <LogOut size={16} />
                 </button>
               </>
             ) : (
               <Link
                 to="/login"
                 className="btn btn-primary btn-sm"
-                style={{ width: '100%', justifyContent: 'center' }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
                 <LogIn size={15} />
-                <span>Đăng nhập / Đăng ký tài khoản</span>
+                <span>Đăng nhập</span>
               </Link>
             )}
           </div>
+
+          {/* Thanh hành động gọn 1 hàng trên điện thoại */}
+          <div className="thx-mobile-actions">
+            {!isAdmin && (
+              <Link
+                to="/cart"
+                className="thx-cart-icon-btn"
+                aria-label={`Giỏ hàng (${cartCount} sản phẩm)`}
+              >
+                <ShoppingCart size={18} />
+                <span
+                  className="thx-cart-badge"
+                  style={{
+                    background: cartCount > 0 ? '#e11d48' : '#6b7280',
+                    color: '#ffffff',
+                  }}
+                >
+                  {cartCount}
+                </span>
+              </Link>
+            )}
+
+            {isAdmin && (
+              <Link
+                to="/admin"
+                className="btn btn-primary btn-sm"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '6px 10px',
+                  fontSize: '0.8rem',
+                }}
+              >
+                <LayoutDashboard size={15} />
+                <span>Quản trị</span>
+              </Link>
+            )}
+
+            {!user && (
+              <Link
+                to="/login"
+                className="btn btn-primary btn-sm"
+                style={{ padding: '6px 11px', fontSize: '0.82rem' }}
+              >
+                Đăng nhập
+              </Link>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Mở menu điều hướng"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 38,
+                height: 38,
+                borderRadius: 11,
+                border: '1px solid #fecdd3',
+                background: '#fffafb',
+                color: '#be123c',
+                cursor: 'pointer',
+              }}
+            >
+              <Menu size={19} />
+            </button>
+          </div>
         </div>
+      </header>
+
+      {/* Overlay Drawer trượt đè lên nội dung kèm lớp phủ tối mờ */}
+      {mobileMenuOpen && (
+        <>
+          <div
+            className="thx-overlay-backdrop"
+            onClick={() => setMobileMenuOpen(false)}
+            aria-hidden="true"
+          />
+
+          <aside className="thx-overlay-drawer" aria-label="Menu điều hướng di động">
+            <div>
+              {/* Đầu ngăn kéo */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingBottom: 14,
+                  marginBottom: 12,
+                  borderBottom: '1px solid #f3f4f6',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 9,
+                      background: '#e11d48',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Flower2 size={18} />
+                  </div>
+                  <span style={{ fontWeight: 800, fontSize: '1rem', color: '#be123c' }}>
+                    Tiệm Hoa Xinh
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuOpen(false)}
+                  aria-label="Đóng menu"
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 10,
+                    border: '1px solid #e5e7eb',
+                    background: '#ffffff',
+                    color: '#374151',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Danh sách trang điều hướng cốt lõi (chỉ mục đang chọn mới có nền hồng) */}
+              <nav style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <NavLink to="/" end style={mobileLinkStyle}>
+                  <span>Trang chủ</span>
+                  <ChevronRight size={16} opacity={0.5} />
+                </NavLink>
+
+                <NavLink to="/shop" style={mobileLinkStyle}>
+                  <span>Bộ sưu tập hoa</span>
+                  <ChevronRight size={16} opacity={0.5} />
+                </NavLink>
+
+                {user && !isAdmin && (
+                  <NavLink to="/my-orders" style={mobileLinkStyle}>
+                    <span>Đơn hàng của tôi</span>
+                    <ChevronRight size={16} opacity={0.5} />
+                  </NavLink>
+                )}
+
+                {isAdmin && (
+                  <NavLink to="/admin" style={mobileLinkStyle}>
+                    <span>Quản trị &amp; AI Dự báo</span>
+                    <ChevronRight size={16} opacity={0.5} />
+                  </NavLink>
+                )}
+              </nav>
+            </div>
+
+            {/* Chân ngăn kéo: Thông tin tài khoản & nút Đăng xuất dạng viền mảnh */}
+            <div
+              style={{
+                paddingTop: 14,
+                borderTop: '1px solid #f3f4f6',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}
+            >
+              {user ? (
+                <>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 9,
+                      padding: '8px 10px',
+                      borderRadius: 10,
+                      background: '#f9fafb',
+                      fontSize: '0.88rem',
+                      fontWeight: 700,
+                      color: '#111827',
+                    }}
+                  >
+                    {isAdmin ? (
+                      <ShieldCheck size={17} color="#e11d48" />
+                    ) : (
+                      <User size={17} color="#e11d48" />
+                    )}
+                    <span
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {isAdmin
+                        ? 'Tài khoản Quản trị viên'
+                        : user.hoTen || user.email || 'Khách hàng'}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="btn btn-outline btn-sm"
+                    style={{
+                      width: '100%',
+                      justifyContent: 'center',
+                      color: '#e11d48',
+                      borderColor: '#fecdd3',
+                      background: '#ffffff',
+                    }}
+                  >
+                    <LogOut size={15} />
+                    <span>Đăng xuất</span>
+                  </button>
+                </>
+              ) : (
+                <Link
+                  to="/login"
+                  className="btn btn-primary btn-sm"
+                  style={{ width: '100%', justifyContent: 'center' }}
+                >
+                  <LogIn size={15} />
+                  <span>Đăng nhập / Đăng ký</span>
+                </Link>
+              )}
+            </div>
+          </aside>
+        </>
       )}
-    </header>
+    </>
   );
 }

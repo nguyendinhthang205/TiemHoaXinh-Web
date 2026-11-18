@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import {
   Sparkles,
   ArrowRight,
-  MessageCircle,
   Heart,
   ShoppingCart,
   LayoutDashboard,
@@ -75,10 +74,6 @@ export default function HomePage() {
     };
   }, [loadProducts]);
 
-  const handleOpenChat = () => {
-    window.dispatchEvent(new Event('thx_open_customer_chat'));
-  };
-
   const handleQuickAdd = (sp) => {
     if (typeof addToCart === 'function' && sp?.maSanPham) {
       addToCart(sp.maSanPham, 1);
@@ -95,37 +90,49 @@ export default function HomePage() {
       <style>{`
         .thx-hero-section {
           background: linear-gradient(135deg, #fff1f2 0%, #fffafb 55%, #ffffff 100%);
-          padding: 52px 0 60px;
+          padding: 46px 0 54px;
           border-bottom: 1px solid #fce7f3;
         }
         .thx-hero-grid {
           display: grid;
           grid-template-columns: 1.12fr 0.88fr;
           align-items: center;
-          gap: 40px;
+          gap: 38px;
         }
         .thx-hero-title {
-          font-size: clamp(1.8rem, 3.8vw, 3.1rem);
+          font-size: clamp(1.75rem, 3.6vw, 3rem);
           line-height: 1.2;
           font-weight: 800;
           color: #111827;
-          margin-bottom: 16px;
+          margin-bottom: 14px;
+        }
+        .thx-hero-desc {
+          font-size: 0.95rem;
+          color: #4b5563;
+          line-height: 1.58;
+          max-width: 520px;
+          margin-bottom: 22px;
         }
         .thx-hero-actions {
           display: flex;
-          gap: 14px;
+          gap: 12px;
           flex-wrap: wrap;
-          margin-bottom: 32px;
+          margin-bottom: 28px;
         }
         .thx-hero-stats {
           display: grid;
           grid-template-columns: repeat(3, 1fr);
-          gap: 18px;
-          padding-top: 18px;
+          gap: 16px;
+          padding-top: 16px;
           border-top: 1px solid #fce7f3;
         }
-        .thx-spotlight-img {
-          height: 330px;
+        .thx-spotlight-img-wrap {
+          width: 100%;
+          aspect-ratio: 4 / 3;
+          border-radius: 15px;
+          overflow: hidden;
+          background: #fff1f2;
+          margin-bottom: 12px;
         }
         .thx-cat-grid {
           display: grid;
@@ -143,44 +150,53 @@ export default function HomePage() {
 
         @media (max-width: 768px) {
           .thx-hero-section {
-            padding: 26px 0 36px;
+            padding: 18px 0 26px;
           }
           .thx-hero-grid {
             grid-template-columns: 1fr;
-            gap: 24px;
+            gap: 18px;
           }
           .thx-hero-title {
-            font-size: 1.72rem;
-            line-height: 1.24;
-            margin-bottom: 12px;
+            font-size: 1.52rem;
+            line-height: 1.22;
+            margin-bottom: 9px;
+          }
+          .thx-hero-desc {
+            font-size: 0.85rem;
+            line-height: 1.48;
+            margin-bottom: 15px;
           }
           .thx-hero-actions {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 24px;
+            gap: 9px;
+            margin-bottom: 16px;
           }
-          .thx-hero-actions > a,
-          .thx-hero-actions > button {
+          .thx-hero-actions > a {
             width: 100%;
             justify-content: center;
-            padding: 11px 10px !important;
-            font-size: 0.86rem !important;
+            padding: 10px 8px !important;
+            font-size: 0.83rem !important;
             white-space: nowrap;
           }
           .thx-hero-stats {
-            gap: 10px;
-            padding-top: 14px;
+            gap: 8px;
+            padding-top: 12px;
           }
           .thx-hero-stat-num {
-            font-size: 1.12rem !important;
+            font-size: 0.98rem !important;
           }
           .thx-hero-stat-label {
-            font-size: 0.74rem !important;
-            line-height: 1.3;
+            font-size: 0.71rem !important;
+            line-height: 1.28;
           }
-          .thx-spotlight-img {
-            height: 240px;
+          .thx-spotlight-card {
+            padding: 12px !important;
+            border-radius: 18px !important;
+          }
+          .thx-spotlight-img-wrap {
+            aspect-ratio: 4 / 3;
+            margin-bottom: 10px;
           }
           .thx-cat-grid {
             grid-template-columns: 1fr;
@@ -210,7 +226,7 @@ export default function HomePage() {
         }
       `}</style>
 
-      {/* Banner chính (Hero Section) */}
+      {/* Banner chính (Hero Section - Tối ưu hiển thị trọn vẹn trong màn hình đầu tiên) */}
       <section className="thx-hero-section">
         <div className="container thx-hero-grid">
           {/* Cột nội dung bên trái */}
@@ -222,18 +238,18 @@ export default function HomePage() {
                 gap: 6,
                 background: '#ffe4e6',
                 color: '#be123c',
-                padding: '5px 12px',
+                padding: '4px 11px',
                 borderRadius: 999,
-                fontSize: '0.76rem',
+                fontSize: '0.74rem',
                 fontWeight: 700,
-                marginBottom: 14,
+                marginBottom: 10,
               }}
             >
               <Sparkles size={13} />
               <span>
                 {isAdmin
                   ? 'Chế Độ Quản Trị Viên • Tiệm Hoa Xinh 2026'
-                  : 'Bộ Sưu Tập Hoa Tươi 2026 • Tích hợp AI Gợi Ý'}
+                  : 'Bộ Sưu Tập Hoa Tươi 2026 • Gợi Ý Chuẩn Gu'}
               </span>
             </div>
 
@@ -244,21 +260,13 @@ export default function HomePage() {
               </span>
             </h1>
 
-            <p
-              style={{
-                fontSize: '0.95rem',
-                color: '#4b5563',
-                lineHeight: 1.6,
-                maxWidth: 530,
-                marginBottom: 22,
-              }}
-            >
+            <p className="thx-hero-desc">
               {isAdmin
-                ? 'Theo dõi nhanh danh mục hoa đang mở bán trên cửa hàng hoặc truy cập Bảng điều khiển để xử lý đơn hàng, phản hồi khách và xem dự báo nhập hàng AI.'
-                : 'Những thiết kế hoa bó, giỏ hoa nghệ thuật được tuyển chọn tỉ mỉ mỗi ngày. Bấm vào bất kỳ mẫu hoa nào để xem hệ thống AI gợi ý các bó hoa đồng điệu nhất.'}
+                ? 'Theo dõi nhanh danh mục hoa đang mở bán hoặc truy cập Bảng điều khiển để xử lý đơn hàng và dự báo nhập hàng.'
+                : 'Những thiết kế hoa bó, giỏ hoa nghệ thuật được tuyển chọn tỉ mỉ mỗi ngày, giúp bạn gửi trọn lời chúc tinh tế đến người thương trong mọi dịp đặc biệt.'}
             </p>
 
-            {/* 2 Nút thao tác chính cân đối trên cả máy tính & điện thoại */}
+            {/* 2 Nút thao tác chính hướng tới mua hoa & gợi ý AI */}
             {isAdmin ? (
               <div className="thx-hero-actions">
                 <Link
@@ -305,16 +313,15 @@ export default function HomePage() {
                     fontSize: '0.94rem',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 8,
+                    gap: 7,
                   }}
                 >
                   <span>Khám phá cửa hàng</span>
-                  <ArrowRight size={17} />
+                  <ArrowRight size={16} />
                 </Link>
 
-                <button
-                  type="button"
-                  onClick={handleOpenChat}
+                <Link
+                  to="/shop?goiY=dip"
                   className="btn btn-outline"
                   style={{
                     padding: '12px 20px',
@@ -325,55 +332,55 @@ export default function HomePage() {
                     fontWeight: 700,
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 8,
+                    gap: 7,
                   }}
                 >
-                  <MessageCircle size={17} />
-                  <span>Nhắn với Admin</span>
-                </button>
+                  <Sparkles size={16} />
+                  <span>Gợi ý hoa theo dịp</span>
+                </Link>
               </div>
             )}
 
-            {/* 3 Chỉ số nổi bật nằm gọn 1 hàng 3 cột */}
+            {/* 3 Cam kết dịch vụ dành cho khách hàng */}
             <div className="thx-hero-stats">
               <div>
                 <div
                   className="thx-hero-stat-num"
-                  style={{ fontSize: '1.35rem', fontWeight: 800, color: '#111827' }}
+                  style={{ fontSize: '1.22rem', fontWeight: 800, color: '#111827' }}
                 >
-                  {products.length > 0 ? `${products.length}+` : '23+'}
+                  Miễn Phí
                 </div>
                 <div
                   className="thx-hero-stat-label"
-                  style={{ fontSize: '0.82rem', color: '#6b7280' }}
+                  style={{ fontSize: '0.8rem', color: '#6b7280' }}
                 >
-                  Mẫu hoa nghệ thuật
+                  Thiệp &amp; Banner thiết kế
                 </div>
               </div>
               <div>
                 <div
                   className="thx-hero-stat-num"
-                  style={{ fontSize: '1.35rem', fontWeight: 800, color: '#111827' }}
+                  style={{ fontSize: '1.22rem', fontWeight: 800, color: '#111827' }}
                 >
-                  TF-IDF AI
+                  Smart AI
                 </div>
                 <div
                   className="thx-hero-stat-label"
-                  style={{ fontSize: '0.82rem', color: '#6b7280' }}
+                  style={{ fontSize: '0.8rem', color: '#6b7280' }}
                 >
-                  Gợi ý tương đồng AI
+                  Gợi ý mẫu hoa chuẩn gu
                 </div>
               </div>
               <div>
                 <div
                   className="thx-hero-stat-num"
-                  style={{ fontSize: '1.35rem', fontWeight: 800, color: '#111827' }}
+                  style={{ fontSize: '1.22rem', fontWeight: 800, color: '#111827' }}
                 >
                   2 Giờ
                 </div>
                 <div
                   className="thx-hero-stat-label"
-                  style={{ fontSize: '0.82rem', color: '#6b7280' }}
+                  style={{ fontSize: '0.8rem', color: '#6b7280' }}
                 >
                   Giao hoa tận tay
                 </div>
@@ -381,28 +388,20 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Cột thẻ hoa nổi bật bên phải */}
+          {/* Cột thẻ hoa nổi bật bên phải (tỷ lệ 4:3 gọn gàng) */}
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             <div
-              className="panel"
+              className="panel thx-spotlight-card"
               style={{
                 width: '100%',
                 maxWidth: 430,
-                padding: 16,
+                padding: 15,
                 borderRadius: 22,
                 boxShadow: '0 20px 45px rgba(225, 29, 72, 0.1)',
                 background: '#ffffff',
               }}
             >
-              <div
-                className="thx-spotlight-img"
-                style={{
-                  borderRadius: 16,
-                  overflow: 'hidden',
-                  background: '#fff1f2',
-                  marginBottom: 14,
-                }}
-              >
+              <div className="thx-spotlight-img-wrap">
                 <img
                   src={
                     spotlightProduct
@@ -426,7 +425,7 @@ export default function HomePage() {
                   <div
                     style={{
                       fontWeight: 700,
-                      fontSize: '1rem',
+                      fontSize: '0.96rem',
                       color: '#111827',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -435,7 +434,7 @@ export default function HomePage() {
                   >
                     {spotlightProduct?.tenSanPham || 'Bó Hồng Pastel Công Chúa'}
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: 2 }}>
+                  <div style={{ fontSize: '0.78rem', color: '#6b7280', marginTop: 2 }}>
                     Thiết kế bán chạy nhất mùa lễ
                   </div>
                 </div>
@@ -458,7 +457,7 @@ export default function HomePage() {
       </section>
 
       {/* Danh mục hoa nổi bật */}
-      <section className="container" style={{ marginTop: 40 }}>
+      <section className="container" style={{ marginTop: 36 }}>
         <div
           style={{
             display: 'flex',
@@ -470,8 +469,8 @@ export default function HomePage() {
           }}
         >
           <div>
-            <h2 style={{ fontSize: '1.5rem', marginBottom: 4 }}>Danh Mục Hoa Nổi Bật</h2>
-            <p style={{ fontSize: '0.88rem', color: '#6b7280' }}>
+            <h2 style={{ fontSize: '1.45rem', marginBottom: 4 }}>Danh Mục Hoa Nổi Bật</h2>
+            <p style={{ fontSize: '0.86rem', color: '#6b7280' }}>
               Lựa chọn kiểu dáng hoa phù hợp với không gian và thông điệp của bạn
             </p>
           </div>
@@ -531,8 +530,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Bộ sưu tập hoa tươi tiêu biểu */}
-      <section className="container" style={{ marginTop: 42, marginBottom: 76 }}>
+      {/* Bộ sưu tập hoa tươi tiêu biểu (Đặt câu hướng dẫn AI ngay trên lưới sản phẩm) */}
+      <section className="container" style={{ marginTop: 40, marginBottom: 76 }}>
         <div
           style={{
             display: 'flex',
@@ -544,9 +543,9 @@ export default function HomePage() {
           }}
         >
           <div>
-            <h2 style={{ fontSize: '1.5rem', marginBottom: 4 }}>Mẫu Hoa Tươi Tuyển Chọn</h2>
-            <p style={{ fontSize: '0.88rem', color: '#6b7280' }}>
-              Cập nhật mẫu mới mỗi ngày &bull; Bấm xem chi tiết để nhận gợi ý phối hoa bằng AI
+            <h2 style={{ fontSize: '1.45rem', marginBottom: 4 }}>Mẫu Hoa Tươi Tuyển Chọn</h2>
+            <p style={{ fontSize: '0.86rem', color: '#6b7280' }}>
+              Bấm vào bất kỳ mẫu hoa nào để xem hệ thống AI gợi ý các bó hoa đồng điệu nhất
             </p>
           </div>
           <Link to="/shop" className="btn btn-outline btn-sm">
