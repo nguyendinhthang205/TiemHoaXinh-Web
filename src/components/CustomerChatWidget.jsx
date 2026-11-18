@@ -3,9 +3,11 @@ import { useLocation } from 'react-router-dom';
 import { PhoneCall, MessageCircle, X, Send } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getHotlineNumber } from '../services/api';
-import * as chatService from '../services/chatService';
-
-const CHAT_STORAGE_KEY = 'thx_chat_conversations';
+import {
+  ensureCustomerConversation,
+  sendCustomerMessage,
+  markConversationReadByCustomer,
+} from '../services/chatService';
 
 export default function CustomerChatWidget() {
   const location = useLocation();
@@ -20,34 +22,14 @@ export default function CustomerChatWidget() {
 
   const isAdminPage = location.pathname.startsWith('/admin');
 
-  const getCustomerIdentity = useCallback(() => {
-    const email = user?.email || 'khach.vang.lai@tiemhoaxinh.vn';
-    const name = user?.hoTen || 'Khách hàng Tiệm Hoa Xinh';
-    const phone = user?.soDienThoai || '';
-    const convId = user?.maNguoiDung ? `user_${user.maNguoiDung}` : `guest_${email}`;
-    return { convId, name, email, phone };
-  }, [user]);
-
   const loadConversationMessages = useCallback(() => {
-    const { convId, email } = getCustomerIdentity();
     try {
-      if (typeof chatService.getAllConversationsForAdmin === 'function') {
-        const all = chatService.getAllConversationsForAdmin() || [];
-        const found = all.find((c) => c.id === convId || c.customerEmail === email);
-        if (found && Array.isArray(found.messages)) {
-          setMessages(found.messages);
-          return;
-        }
-      }
-      const raw = localStorage.getItem(CHAT_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      const list = Array.isArray(parsed) ? parsed : Object.values(parsed || {});
-      const found = list.find((c) => c.id === convId || c.customerEmail === email);
-      setMessages(found?.messages || []);
+      const conv = ensureCustomerConversation(user);
+      setMessages(Array.isArray(conv?.messages) ? conv.messages : []);
     } catch {
       setMessages([]);
     }
-  }, [getCustomerIdentity]);
+  }, [user]);
 
   useEffect(() => {
     loadConversationMessages();
@@ -55,6 +37,7 @@ export default function CustomerChatWidget() {
     const handleOpenChat = () => {
       setIsOpen(true);
       loadConversationMessages();
+      markConversationReadByCustomer(user);
     };
     const handleSyncChat = () => loadConversationMessages();
     const handleSyncHotline = () => setHotline(getHotlineNumber());
@@ -72,76 +55,30 @@ export default function CustomerChatWidget() {
       window.removeEventListener('thx_hotline_updated', handleSyncHotline);
       window.removeEventListener('storage', handleSyncHotline);
     };
-  }, [loadConversationMessages]);
+  }, [loadConversationMessages, user]);
 
   useEffect(() => {
     if (isOpen) {
+      markConversationReadByCustomer(user);
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 60);
     }
-  }, [isOpen, messages.length]);
+  }, [isOpen, messages.length, user]);
 
   const handleSendMessage = (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     const text = inputText.trim();
     if (!text) return;
 
-    const { convId, name, email, phone } = getCustomerIdentity();
-    const nowIso = new Date().toISOString();
-
-    if (typeof chatService.sendCustomerMessage === 'function') {
-      chatService.sendCustomerMessage({
-        conversationId: convId,
-        customerName: name,
-        customerEmail: email,
-        customerPhone: phone,
-        text,
-      });
-    } else {
-      try {
-        const raw = localStorage.getItem(CHAT_STORAGE_KEY);
-        const parsed = raw ? JSON.parse(raw) : [];
-        const list = Array.isArray(parsed) ? parsed : Object.values(parsed || {});
-        const idx = list.findIndex((c) => c.id === convId || c.customerEmail === email);
-        const newMsg = {
-          id: `msg_${Date.now()}`,
-          sender: 'customer',
-          text,
-          createdAt: nowIso,
-        };
-
-        if (idx >= 0) {
-          list[idx] = {
-            ...list[idx],
-            customerName: name,
-            customerEmail: email,
-            customerPhone: phone || list[idx].customerPhone,
-            updatedAt: nowIso,
-            unreadByAdmin: (list[idx].unreadByAdmin || 0) + 1,
-            messages: [...(list[idx].messages || []), newMsg],
-          };
-        } else {
-          list.unshift({
-            id: convId,
-            customerName: name,
-            customerEmail: email,
-            customerPhone: phone,
-            updatedAt: nowIso,
-            unreadByAdmin: 1,
-            messages: [newMsg],
-          });
-        }
-        localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(list));
-      } catch {
-        // Bỏ qua nếu bộ nhớ đầy
-      }
-    }
-
+    const updatedConv = sendCustomerMessage(user, text);
     setInputText('');
-    window.dispatchEvent(new Event('thx_chat_updated'));
-    window.dispatchEvent(new Event('storage'));
-    loadConversationMessages();
+
+    if (updatedConv && Array.isArray(updatedConv.messages)) {
+      setMessages(updatedConv.messages);
+    } else {
+      loadConversationMessages();
+    }
   };
 
   if (isAdminPage) return null;
@@ -191,7 +128,6 @@ export default function CustomerChatWidget() {
         }
       `}</style>
 
-      {/* Khung hộp thoại nhắn tin trực tiếp với Admin (Mở khi bấm "Nhắn với Admin" hoặc "Nhắn tin Admin") */}
       {isOpen && (
         <div
           style={{
@@ -264,20 +200,6 @@ export default function CustomerChatWidget() {
               gap: 10,
             }}
           >
-            <div
-              style={{
-                background: '#ffffff',
-                border: '1px solid #fce7f3',
-                padding: '9px 12px',
-                borderRadius: '14px 14px 14px 4px',
-                fontSize: '0.84rem',
-                color: '#374151',
-                maxWidth: '85%',
-              }}
-            >
-              Xin chào! Bạn cần tư vấn mẫu hoa sinh nhật, khai trương hay đặt thiết kế riêng theo yêu cầu ạ?
-            </div>
-
             {messages.map((m) => {
               const isCustomer = m.sender === 'customer';
               return (
@@ -322,15 +244,21 @@ export default function CustomerChatWidget() {
             }}
           >
             <input
+              id="customer-chat-input"
+              name="message"
               type="text"
               className="form-control"
               placeholder="Nhập tin nhắn gửi Admin..."
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSendMessage(e);
+              }}
               style={{ height: 38, fontSize: '0.86rem' }}
             />
             <button
-              type="submit"
+              type="button"
+              onClick={handleSendMessage}
               className="btn btn-primary btn-sm"
               style={{ height: 38, padding: '0 14px' }}
             >
@@ -340,7 +268,6 @@ export default function CustomerChatWidget() {
         </div>
       )}
 
-      {/* Nút Hotline gọi nhanh nhấp nháy nhiều màu ở góc dưới bên phải */}
       <a
         href={`tel:${String(hotline).replace(/[^0-9+]/g, '')}`}
         title={`Gọi ngay Hotline ${hotline} để được tư vấn chọn hoa miễn phí`}
