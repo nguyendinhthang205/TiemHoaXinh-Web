@@ -17,6 +17,7 @@ import api, {
   formatVND,
   getFlowerImage,
   getProductRatingStats,
+  getProductOverrides,
   syncProductReviewsFromCloud,
   syncProductOverridesFromCloud,
 } from '../services/api';
@@ -87,12 +88,45 @@ const BUDGET_OPTIONS = [
   { id: 'over-700', label: 'Trên 700.000đ' },
 ];
 
+function applyLocalOverridesToList(list) {
+  const overrides = getProductOverrides();
+  return list.map((p) => {
+    const byId = p.maSanPham != null ? overrides[String(p.maSanPham)] : null;
+    const nameKey = p.tenSanPham
+      ? `name:${String(p.tenSanPham).trim().toLowerCase()}`
+      : '';
+    const byName = nameKey ? overrides[nameKey] : null;
+    const matched = byId || byName;
+    if (!matched) return p;
+
+    const resolvedImg =
+      byId?.hinhAnhChinh ||
+      byId?.anhChinh ||
+      byName?.hinhAnhChinh ||
+      byName?.anhChinh ||
+      p.anhChinh;
+
+    return {
+      ...p,
+      anhChinh: resolvedImg,
+      hinhAnhChinh: resolvedImg || p.hinhAnhChinh,
+      hinhAnh: resolvedImg || p.hinhAnh,
+      tongMauSac: matched.tongMauSac || p.tongMauSac,
+      maDanhMuc: matched.maDanhMuc ?? p.maDanhMuc,
+      danhMucTrangChu: Array.isArray(matched.danhMucTrangChu)
+        ? matched.danhMucTrangChu
+        : p.danhMucTrangChu,
+    };
+  });
+}
+
 export default function HomePage() {
   const appCtx = useApp() || {};
   const { addToCart, user, showToast } = appCtx;
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const catalogRef = useRef(null);
+  const initialLoadedRef = useRef(false);
 
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -107,7 +141,7 @@ export default function HomePage() {
       return [];
     }
   });
-  const [, setReviewTick] = useState(0);
+  const [, setSyncVersion] = useState(0);
 
   const [keyword, setKeyword] = useState(searchParams.get('q') || '');
   const [activeNavCat, setActiveNavCat] = useState(searchParams.get('cat') || '');
@@ -125,16 +159,18 @@ export default function HomePage() {
 
   const showAdminTools = isActualAdmin && !previewAsCustomer;
 
-  const loadProducts = useCallback(async () => {
+  // Tải danh sách sản phẩm 1 lần duy nhất khi mở trang, tuyệt đối không gây nhấp nháy
+  const fetchInitialProducts = useCallback(async () => {
+    if (initialLoadedRef.current) return;
+    initialLoadedRef.current = true;
     try {
       setLoading(true);
-      await syncProductOverridesFromCloud();
       const [spRes, dmRes] = await Promise.all([
         api.get('/SanPham'),
         api.get('/DanhMuc').catch(() => ({ data: [] })),
       ]);
-      const list = Array.isArray(spRes.data) ? spRes.data : spRes.data?.items || [];
-      setProducts(list);
+      const rawList = Array.isArray(spRes.data) ? spRes.data : spRes.data?.items || [];
+      setProducts(applyLocalOverridesToList(rawList));
       setCategories(Array.isArray(dmRes.data) ? dmRes.data : []);
     } catch {
       setProducts([]);
@@ -144,21 +180,27 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    loadProducts();
-    syncProductReviewsFromCloud().then(() => setReviewTick((t) => t + 1));
+    fetchInitialProducts();
 
-    const handleProductSync = () => loadProducts();
-    const handleReviewSync = () => setReviewTick((t) => t + 1);
+    // Đồng bộ ngầm ảnh & đánh giá từ đám mây, chỉ cập nhật nhẹ trên RAM chứ không gọi lại API
+    syncProductOverridesFromCloud().catch(() => {});
+    syncProductReviewsFromCloud().catch(() => {});
+
+    const handleProductSync = () => {
+      setProducts((prev) => applyLocalOverridesToList(prev));
+      setSyncVersion((v) => v + 1);
+    };
+    const handleReviewSync = () => {
+      setSyncVersion((v) => v + 1);
+    };
 
     window.addEventListener('thx_products_updated', handleProductSync);
     window.addEventListener('thx_reviews_updated', handleReviewSync);
-    window.addEventListener('storage', handleProductSync);
     return () => {
       window.removeEventListener('thx_products_updated', handleProductSync);
       window.removeEventListener('thx_reviews_updated', handleReviewSync);
-      window.removeEventListener('storage', handleProductSync);
     };
-  }, [loadProducts]);
+  }, [fetchInitialProducts]);
 
   useEffect(() => {
     const qParam = searchParams.get('q') || '';
@@ -263,7 +305,6 @@ export default function HomePage() {
       return a.maSanPham - b.maSanPham;
     });
 
-  // Chọn bó hoa nổi bật ảnh sắc nét, nền sạch
   const spotlightProduct =
     products.find((p) => {
       const img = getFlowerImage(p);
@@ -509,7 +550,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Hero Section thuần túy dành cho khách hàng, gọn chiều cao */}
+      {/* Hero Section thuần túy dành cho khách hàng */}
       <section className="thx-hero-section">
         <div className="container thx-hero-grid">
           <div>
@@ -713,7 +754,6 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* Thanh lọc gọn gàng: Dịp tặng + 5 ô lọc ngang */}
         <div className="thx-compact-filter-bar">
           <div className="thx-occasion-pills">
             <span
@@ -838,7 +878,6 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Lưới sản phẩm */}
         {loading ? (
           <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
             Đang tải danh sách mẫu hoa...

@@ -87,7 +87,7 @@ export default function Navbar() {
   const [hoveredCat, setHoveredCat] = useState(null);
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
 
-  const isAdminRoute = location.pathname.startsWith('/admin');
+  const isAdminRoute = location.pathname.toLowerCase().startsWith('/admin');
 
   const roleStr = String(
     user?.vaiTro || user?.role || user?.quyen || ''
@@ -162,7 +162,7 @@ export default function Navbar() {
     navigate('/login');
   };
 
-  // Trên trang Quản trị & Dự báo AI: Ẩn toàn bộ banner cửa hàng, chỉ giữ thanh điều hướng nội bộ gọn gàng
+  // Khi vào màn hình Quản trị & Dự báo AI: Cắt toàn bộ banner cửa hàng phía trên
   if (isAdminRoute) {
     return (
       <header
@@ -180,43 +180,47 @@ export default function Navbar() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            height: 48,
+            height: 46,
             gap: 12,
             flexWrap: 'wrap',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <Link
               to="/"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 6,
-                color: '#374151',
+                color: '#111827',
                 textDecoration: 'none',
                 fontWeight: 600,
                 fontSize: '0.84rem',
               }}
             >
-              <Store size={15} color="#e11d48" />
+              <Store size={15} />
               <span>Xem trang cửa hàng</span>
             </Link>
 
             <span style={{ color: '#e5e7eb' }}>|</span>
 
-            <span
+            <Link
+              to="/admin"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 6,
                 color: '#e11d48',
+                textDecoration: 'none',
                 fontWeight: 700,
                 fontSize: '0.84rem',
+                borderBottom: '2px solid #e11d48',
+                paddingBottom: 2,
               }}
             >
               <LayoutDashboard size={15} />
               <span>Quản trị &amp; AI Dự báo</span>
-            </span>
+            </Link>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: '0.84rem' }}>
@@ -242,7 +246,7 @@ export default function Navbar() {
                 gap: 5,
                 background: 'transparent',
                 border: 'none',
-                color: '#e11d48',
+                color: '#111827',
                 fontWeight: 600,
                 cursor: 'pointer',
                 fontSize: '0.84rem',
@@ -274,7 +278,7 @@ export default function Navbar() {
             background: #fffafb;
             border-bottom: 1px solid #fce7f3;
             font-size: 0.78rem;
-            color: #4b5563;
+            color: #111827;
           }
           .thx-top-utility-inner {
             display: flex;
@@ -292,17 +296,19 @@ export default function Navbar() {
             display: inline-flex;
             align-items: center;
             gap: 5px;
-            color: #374151;
+            color: #111827;
             text-decoration: none;
-            font-weight: 500;
+            font-weight: 600;
             background: transparent;
             border: none;
             cursor: pointer;
             padding: 0;
             font-size: 0.78rem;
+            transition: color 0.15s ease;
           }
-          .thx-util-item:hover {
-            color: #e11d48;
+          .thx-util-item:hover,
+          .thx-util-item:active {
+            color: #e11d48 !important;
           }
           .thx-main-header-row {
             display: grid;
@@ -396,7 +402,8 @@ export default function Navbar() {
             white-space: nowrap;
             transition: color 0.15s ease, border-color 0.15s ease;
           }
-          .thx-cat-trigger:hover {
+          .thx-cat-trigger:hover,
+          .thx-cat-trigger:active {
             color: #e11d48 !important;
           }
           .thx-cat-dropdown {
@@ -422,7 +429,7 @@ export default function Navbar() {
             border-bottom: 1px solid #f9fafb;
             font-size: 0.78rem;
             font-weight: 600;
-            color: #374151;
+            color: #111827;
             cursor: pointer;
             transition: all 0.14s ease;
           }
@@ -501,7 +508,10 @@ export default function Navbar() {
                 <Link
                   to="/admin"
                   className="thx-util-item"
-                  style={{ color: '#e11d48', fontWeight: 700 }}
+                  style={{
+                    color: isAdminRoute ? '#e11d48' : '#111827',
+                    fontWeight: 700,
+                  }}
                 >
                   <LayoutDashboard size={13} />
                   <span>Quản trị &amp; AI Dự báo</span>
@@ -532,7 +542,6 @@ export default function Navbar() {
                     type="button"
                     onClick={handleLogout}
                     className="thx-util-item"
-                    style={{ color: '#e11d48' }}
                   >
                     <LogOut size={13} />
                     <span>Đăng xuất</span>
@@ -660,7 +669,7 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* 3. Thanh danh mục ngang 6 mục chuẩn (Bấm vào chữ từ đen chuyển sang đỏ rõ ràng) */}
+        {/* 3. Thanh danh mục ngang 6 mục chuẩn (Chữ từ đen chuyển sang đỏ khi bấm chọn) */}
         <nav className="thx-cat-bar-wrap" aria-label="Danh mục hoa tươi">
           <div className="container thx-cat-bar">
             {STORE_CATEGORY_MENU.map((cat) => {
@@ -680,7 +689,7 @@ export default function Navbar() {
                     onClick={() => handleSelectCategory(cat.id)}
                     className="thx-cat-trigger"
                     style={{
-                      color: isSelected ? '#e11d48' : '#1f2937',
+                      color: isSelected ? '#e11d48' : '#111827',
                       borderBottomColor: isSelected ? '#e11d48' : 'transparent',
                     }}
                   >
@@ -761,7 +770,7 @@ export default function Navbar() {
                 borderRadius: 10,
                 border: '1px solid #e5e7eb',
                 background: '#ffffff',
-                color: '#1f2937',
+                color: '#111827',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -786,8 +795,14 @@ export default function Navbar() {
             {isAdmin && (
               <Link
                 to="/admin"
-                className="btn btn-primary btn-sm"
-                style={{ padding: '6px 10px', fontSize: '0.78rem' }}
+                className="btn btn-outline btn-sm"
+                style={{
+                  padding: '6px 10px',
+                  fontSize: '0.78rem',
+                  color: isAdminRoute ? '#e11d48' : '#111827',
+                  borderColor: isAdminRoute ? '#e11d48' : '#e5e7eb',
+                  fontWeight: 700,
+                }}
               >
                 Quản trị
               </Link>
@@ -815,7 +830,6 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* Thanh tìm kiếm mở nhanh trên điện thoại */}
         {mobileSearchOpen && (
           <div className="container" style={{ paddingBottom: 12 }}>
             <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: 8 }}>
@@ -905,7 +919,7 @@ export default function Navbar() {
                             border: 'none',
                             fontWeight: 700,
                             fontSize: '0.85rem',
-                            color: isSelected ? '#e11d48' : '#1f2937',
+                            color: isSelected ? '#e11d48' : '#111827',
                             cursor: 'pointer',
                           }}
                         >
@@ -993,7 +1007,7 @@ export default function Navbar() {
                         borderRadius: 10,
                         border: '1px solid #e5e7eb',
                         textDecoration: 'none',
-                        color: '#1f2937',
+                        color: '#111827',
                         fontWeight: 600,
                         fontSize: '0.88rem',
                         display: 'flex',
@@ -1012,9 +1026,10 @@ export default function Navbar() {
                       style={{
                         padding: '10px 12px',
                         borderRadius: 10,
-                        background: '#e11d48',
+                        border: '1px solid #e5e7eb',
+                        background: isAdminRoute ? '#fff1f2' : '#ffffff',
                         textDecoration: 'none',
-                        color: '#ffffff',
+                        color: isAdminRoute ? '#e11d48' : '#111827',
                         fontWeight: 700,
                         fontSize: '0.88rem',
                         display: 'flex',
@@ -1069,7 +1084,7 @@ export default function Navbar() {
                     type="button"
                     onClick={handleLogout}
                     className="btn btn-outline btn-sm"
-                    style={{ width: '100%', justifyContent: 'center', color: '#e11d48' }}
+                    style={{ width: '100%', justifyContent: 'center', color: '#111827' }}
                   >
                     <LogOut size={15} />
                     <span>Đăng xuất</span>
