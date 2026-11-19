@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Link, useSearchParams, useLocation } from 'react-router-dom';
 import {
   Sparkles,
@@ -24,6 +24,7 @@ import api, {
 import { useApp } from '../context/AppContext';
 
 const WISHLIST_STORAGE_KEY = 'thx_wishlist_ids';
+const HOME_PRODUCTS_CACHE_KEY = 'thx_home_products_cache';
 
 const STANDARD_COLORS = [
   'Hồng Pastel',
@@ -89,6 +90,7 @@ const BUDGET_OPTIONS = [
 ];
 
 function applyLocalOverridesToList(list) {
+  if (!Array.isArray(list)) return [];
   const overrides = getProductOverrides();
   return list.map((p) => {
     const byId = p.maSanPham != null ? overrides[String(p.maSanPham)] : null;
@@ -120,17 +122,26 @@ function applyLocalOverridesToList(list) {
   });
 }
 
+function readCachedHomeProducts() {
+  try {
+    const raw = localStorage.getItem(HOME_PRODUCTS_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? applyLocalOverridesToList(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function HomePage() {
   const appCtx = useApp() || {};
   const { addToCart, user, showToast } = appCtx;
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const catalogRef = useRef(null);
-  const initialLoadedRef = useRef(false);
 
-  const [products, setProducts] = useState([]);
+  const [products, setProducts] = useState(() => readCachedHomeProducts());
   const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => readCachedHomeProducts().length === 0);
   const [previewAsCustomer, setPreviewAsCustomer] = useState(false);
   const [wishlistIds, setWishlistIds] = useState(() => {
     try {
@@ -159,48 +170,54 @@ export default function HomePage() {
 
   const showAdminTools = isActualAdmin && !previewAsCustomer;
 
-  // Tải danh sách sản phẩm 1 lần duy nhất khi mở trang, tuyệt đối không gây nhấp nháy
-  const fetchInitialProducts = useCallback(async () => {
-    if (initialLoadedRef.current) return;
-    initialLoadedRef.current = true;
-    try {
-      setLoading(true);
-      const [spRes, dmRes] = await Promise.all([
-        api.get('/SanPham'),
-        api.get('/DanhMuc').catch(() => ({ data: [] })),
-      ]);
-      const rawList = Array.isArray(spRes.data) ? spRes.data : spRes.data?.items || [];
-      setProducts(applyLocalOverridesToList(rawList));
-      setCategories(Array.isArray(dmRes.data) ? dmRes.data : []);
-    } catch {
-      setProducts([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    fetchInitialProducts();
+    let isMounted = true;
 
-    // Đồng bộ ngầm ảnh & đánh giá từ đám mây, chỉ cập nhật nhẹ trên RAM chứ không gọi lại API
-    syncProductOverridesFromCloud().catch(() => {});
-    syncProductReviewsFromCloud().catch(() => {});
+    async function initHomeData() {
+      try {
+        const [spRes, dmRes] = await Promise.all([
+          api.get('/SanPham'),
+          api.get('/DanhMuc').catch(() => ({ data: [] })),
+        ]);
+        if (!isMounted) return;
+        const rawList = Array.isArray(spRes.data) ? spRes.data : spRes.data?.items || [];
+        const enriched = applyLocalOverridesToList(rawList);
+        setProducts(enriched);
+        setCategories(Array.isArray(dmRes.data) ? dmRes.data : []);
+        try {
+          localStorage.setItem(HOME_PRODUCTS_CACHE_KEY, JSON.stringify(rawList));
+        } catch {
+          // Bỏ qua
+        }
+      } catch {
+        // Giữ dữ liệu cache nếu mạng chậm
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+
+      syncProductOverridesFromCloud().catch(() => {});
+      syncProductReviewsFromCloud().catch(() => {});
+    }
+
+    initHomeData();
 
     const handleProductSync = () => {
+      if (!isMounted) return;
       setProducts((prev) => applyLocalOverridesToList(prev));
-      setSyncVersion((v) => v + 1);
     };
     const handleReviewSync = () => {
+      if (!isMounted) return;
       setSyncVersion((v) => v + 1);
     };
 
     window.addEventListener('thx_products_updated', handleProductSync);
     window.addEventListener('thx_reviews_updated', handleReviewSync);
     return () => {
+      isMounted = false;
       window.removeEventListener('thx_products_updated', handleProductSync);
       window.removeEventListener('thx_reviews_updated', handleReviewSync);
     };
-  }, [fetchInitialProducts]);
+  }, []);
 
   useEffect(() => {
     const qParam = searchParams.get('q') || '';
@@ -336,6 +353,8 @@ export default function HomePage() {
     : activeNavCat && CATEGORY_RULES[activeNavCat]
     ? CATEGORY_RULES[activeNavCat].title
     : 'Danh Sách Mẫu Hoa Tươi';
+
+  const isInitialLoading = loading && products.length === 0;
 
   return (
     <div>
@@ -479,7 +498,6 @@ export default function HomePage() {
         }
       `}</style>
 
-      {/* Thanh Admin mỏng tách biệt hoàn toàn khỏi Hero của khách */}
       {isActualAdmin && (
         <div
           style={{
@@ -550,7 +568,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Hero Section thuần túy dành cho khách hàng */}
       <section className="thx-hero-section">
         <div className="container thx-hero-grid">
           <div>
@@ -717,7 +734,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Khu vực Bộ Lọc Thu Gọn & Danh Sách Sản Phẩm */}
       <section
         id="catalog"
         ref={catalogRef}
@@ -878,7 +894,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        {loading ? (
+        {isInitialLoading ? (
           <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
             Đang tải danh sách mẫu hoa...
           </div>

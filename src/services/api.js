@@ -44,7 +44,7 @@ async function fetchCloudWithTimeout(options = {}, timeoutMs = 5500) {
 
 async function getSharedCloudBin(forceFresh = false) {
   const now = Date.now();
-  if (!forceFresh && lastCloudPayload && now - lastCloudFetchedAt < 3000) {
+  if (!forceFresh && lastCloudPayload && now - lastCloudFetchedAt < 4000) {
     return lastCloudPayload;
   }
   if (inFlightCloudGet) {
@@ -68,6 +68,31 @@ async function getSharedCloudBin(forceFresh = false) {
   })();
 
   return inFlightCloudGet;
+}
+
+function isSameOverrideItem(a, b) {
+  if (!a || !b) return false;
+  return (
+    (a.hinhAnhChinh || '') === (b.hinhAnhChinh || '') &&
+    (a.anhChinh || '') === (b.anhChinh || '') &&
+    (a.tongMauSac || '') === (b.tongMauSac || '') &&
+    Number(a.maDanhMuc || 0) === Number(b.maDanhMuc || 0) &&
+    Number(a.updatedAt || 0) === Number(b.updatedAt || 0) &&
+    JSON.stringify(a.danhMucTrangChu || []) === JSON.stringify(b.danhMucTrangChu || [])
+  );
+}
+
+function isSameOrderMetaItem(a, b) {
+  if (!a || !b) return false;
+  return (
+    (a.statusOverride || '') === (b.statusOverride || '') &&
+    Boolean(a.deleted) === Boolean(b.deleted) &&
+    Boolean(a.isPaid) === Boolean(b.isPaid) &&
+    (a.deliveryMethod || '') === (b.deliveryMethod || '') &&
+    Number(a.shippingFee || 0) === Number(b.shippingFee || 0) &&
+    Number(a.grandTotal || 0) === Number(b.grandTotal || 0) &&
+    Number(a.updatedAt || 0) === Number(b.updatedAt || 0)
+  );
 }
 
 // Dọn các dữ liệu phụ cũ trước, luôn ưu tiên giữ lại hình ảnh sản phẩm mới nhất
@@ -212,8 +237,9 @@ export async function syncOrderMetaFromCloud() {
       const rTime = Number(rItem.updatedAt || 0);
       const lTime = Number(lItem?.updatedAt || 0);
       if (!lItem || rTime >= lTime) {
-        if (JSON.stringify(lItem) !== JSON.stringify(rItem)) {
-          merged[orderId] = { ...(lItem || {}), ...rItem };
+        const nextMerged = { ...(lItem || {}), ...rItem };
+        if (!isSameOrderMetaItem(lItem, nextMerged)) {
+          merged[orderId] = nextMerged;
           localChanged = true;
         }
       }
@@ -303,7 +329,7 @@ export function getProductOverrides() {
 export async function syncProductOverridesFromCloud() {
   const localOverrides = getProductOverrides();
   try {
-    const raw = await getSharedCloudBin(true);
+    const raw = await getSharedCloudBin(false);
     if (!raw) return localOverrides;
     const safeBin = { ...raw };
     const remoteOverrides =
@@ -323,8 +349,9 @@ export async function syncProductOverridesFromCloud() {
       const rTime = Number(rItem.updatedAt || 0);
       const lTime = Number(lItem?.updatedAt || 0);
       if (!lItem || rTime >= lTime) {
-        if (JSON.stringify(lItem) !== JSON.stringify(rItem)) {
-          merged[key] = { ...(lItem || {}), ...rItem };
+        const nextMerged = { ...(lItem || {}), ...rItem };
+        if (!isSameOverrideItem(lItem, nextMerged)) {
+          merged[key] = nextMerged;
           localChanged = true;
         }
       }
