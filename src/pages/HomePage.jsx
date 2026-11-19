@@ -7,23 +7,43 @@ import {
   LayoutDashboard,
   Settings,
   Search,
-  SlidersHorizontal,
   RotateCcw,
-  Gift,
-  Wallet,
-  Palette,
   Heart,
   Star,
+  ShieldCheck,
+  Eye,
 } from 'lucide-react';
 import api, {
   formatVND,
   getFlowerImage,
   getProductRatingStats,
   syncProductReviewsFromCloud,
+  syncProductOverridesFromCloud,
 } from '../services/api';
 import { useApp } from '../context/AppContext';
 
 const WISHLIST_STORAGE_KEY = 'thx_wishlist_ids';
+
+const STANDARD_COLORS = [
+  'Hồng Pastel',
+  'Đỏ',
+  'Vàng',
+  'Trắng',
+  'Tím',
+  'Cam Đào',
+];
+
+function normalizeColorGroup(rawColor) {
+  const s = String(rawColor || '').trim().toLowerCase();
+  if (!s) return 'Hồng Pastel';
+  if (s.includes('đỏ')) return 'Đỏ';
+  if (s.includes('vàng')) return 'Vàng';
+  if (s.includes('trắng')) return 'Trắng';
+  if (s.includes('tím')) return 'Tím';
+  if (s.includes('cam')) return 'Cam Đào';
+  if (s.includes('hồng') || s.includes('pastel')) return 'Hồng Pastel';
+  return 'Hồng Pastel';
+}
 
 const CATEGORY_RULES = {
   'sinh-nhat': {
@@ -51,18 +71,12 @@ const CATEGORY_RULES = {
     keywords: [],
     categories: [1, 2, 3, 4, 5],
   },
-  'hoa-tuoi': {
-    title: 'Các Loài Hoa Tươi',
-    keywords: ['hồng', 'hướng dương', 'tulip', 'baby', 'lan'],
-    categories: [1, 2, 3, 4, 5],
-  },
 };
 
 const OCCASION_OPTIONS = [
   { id: '', label: 'Tất cả dịp' },
   { id: 'sinh-nhat', label: '🎂 Sinh nhật' },
   { id: 'khai-truong', label: '🎉 Khai trương' },
-  { id: 'lan-ho-diep', label: '🪴 Lan Hồ Điệp' },
   { id: 'chu-de', label: '❤️ Tình yêu & Tri ân' },
 ];
 
@@ -72,16 +86,6 @@ const BUDGET_OPTIONS = [
   { id: '400-700', label: '400.000đ – 700.000đ' },
   { id: 'over-700', label: 'Trên 700.000đ' },
 ];
-
-function readWishlist() {
-  try {
-    const raw = localStorage.getItem(WISHLIST_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
 
 export default function HomePage() {
   const appCtx = useApp() || {};
@@ -93,7 +97,16 @@ export default function HomePage() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [wishlistIds, setWishlistIds] = useState(() => readWishlist());
+  const [previewAsCustomer, setPreviewAsCustomer] = useState(false);
+  const [wishlistIds, setWishlistIds] = useState(() => {
+    try {
+      const raw = localStorage.getItem(WISHLIST_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
   const [, setReviewTick] = useState(0);
 
   const [keyword, setKeyword] = useState(searchParams.get('q') || '');
@@ -105,14 +118,17 @@ export default function HomePage() {
   const [selectedBudget, setSelectedBudget] = useState('');
   const [sortBy, setSortBy] = useState('default');
 
-  const isAdmin =
+  const isActualAdmin =
     String(user?.vaiTro || user?.role || '').toLowerCase() === 'admin' ||
     String(user?.email || '').toLowerCase().includes('admin') ||
     String(user?.hoTen || '').trim().toLowerCase() === 'admin';
 
+  const showAdminTools = isActualAdmin && !previewAsCustomer;
+
   const loadProducts = useCallback(async () => {
     try {
       setLoading(true);
+      await syncProductOverridesFromCloud();
       const [spRes, dmRes] = await Promise.all([
         api.get('/SanPham'),
         api.get('/DanhMuc').catch(() => ({ data: [] })),
@@ -202,10 +218,6 @@ export default function HomePage() {
     setSearchParams({});
   };
 
-  const uniqueColors = Array.from(
-    new Set(products.map((p) => p.tongMauSac).filter(Boolean))
-  );
-
   const filteredProducts = products
     .filter((p) => {
       const price = Number(p.giaBan || 0);
@@ -217,7 +229,9 @@ export default function HomePage() {
       if (selectedCategory && String(p.maDanhMuc) !== String(selectedCategory)) {
         return false;
       }
-      if (selectedColor && p.tongMauSac !== selectedColor) return false;
+      if (selectedColor && normalizeColorGroup(p.tongMauSac) !== selectedColor) {
+        return false;
+      }
 
       if (selectedBudget === 'under-400' && !(price < 400000)) return false;
       if (selectedBudget === '400-700' && !(price >= 400000 && price <= 700000)) {
@@ -229,7 +243,6 @@ export default function HomePage() {
         const subKw = subQuery.toLowerCase();
         if (!text.includes(subKw)) return false;
       } else if (activeNavCat && CATEGORY_RULES[activeNavCat]) {
-        // Ưu tiên danh mục Trang chủ mà Admin đã chọn trong modal Cập Nhật Mẫu Hoa
         if (Array.isArray(p.danhMucTrangChu) && p.danhMucTrangChu.length > 0) {
           if (!p.danhMucTrangChu.includes(activeNavCat)) return false;
         } else {
@@ -246,13 +259,26 @@ export default function HomePage() {
       if (sortBy === 'price-asc') return a.giaBan - b.giaBan;
       if (sortBy === 'price-desc') return b.giaBan - a.giaBan;
       if (sortBy === 'newest') return b.maSanPham - a.maSanPham;
+      if (sortBy === 'bestseller') return (a.soLuongTon ?? 20) - (b.soLuongTon ?? 20);
       return a.maSanPham - b.maSanPham;
     });
 
+  // Chọn bó hoa nổi bật ảnh sắc nét, nền sạch
   const spotlightProduct =
-    products.find((p) =>
-      String(p.tenSanPham || '').toLowerCase().includes('công chúa')
-    ) || products[0];
+    products.find((p) => {
+      const img = getFlowerImage(p);
+      return (
+        String(p.tenSanPham || '').toLowerCase().includes('công chúa') &&
+        img.startsWith('http')
+      );
+    }) ||
+    products.find((p) => getFlowerImage(p).startsWith('http')) ||
+    products[0];
+
+  const spotlightImageUrl =
+    spotlightProduct && getFlowerImage(spotlightProduct).startsWith('http')
+      ? getFlowerImage(spotlightProduct)
+      : 'https://images.unsplash.com/photo-1526047932273-341f2a7631f9?auto=format&fit=crop&w=900&q=85';
 
   const hasAnyFilter = Boolean(
     keyword ||
@@ -274,126 +300,118 @@ export default function HomePage() {
     <div>
       <style>{`
         .thx-hero-section {
-          background: linear-gradient(135deg, #fff1f2 0%, #fffafb 55%, #ffffff 100%);
-          padding: 36px 0 42px;
+          background: linear-gradient(135deg, #fff1f2 0%, #fffafb 58%, #ffffff 100%);
+          padding: 24px 0 28px;
           border-bottom: 1px solid #fce7f3;
         }
         .thx-hero-grid {
           display: grid;
-          grid-template-columns: 1.15fr 0.85fr;
+          grid-template-columns: 1.2fr 0.8fr;
           align-items: center;
-          gap: 32px;
+          gap: 28px;
         }
         .thx-hero-title {
-          font-size: clamp(1.7rem, 3.4vw, 2.8rem);
-          line-height: 1.2;
+          font-size: clamp(1.6rem, 3.1vw, 2.55rem);
+          line-height: 1.18;
           font-weight: 800;
           color: #111827;
-          margin-bottom: 12px;
+          margin-bottom: 10px;
         }
         .thx-hero-desc {
-          font-size: 0.94rem;
+          font-size: 0.92rem;
           color: #4b5563;
-          line-height: 1.55;
-          max-width: 520px;
-          margin-bottom: 20px;
+          line-height: 1.52;
+          max-width: 510px;
+          margin-bottom: 16px;
         }
         .thx-hero-actions {
           display: flex;
-          gap: 12px;
+          gap: 10px;
           flex-wrap: wrap;
-          margin-bottom: 22px;
+          margin-bottom: 18px;
         }
         .thx-hero-stats {
           display: grid;
           grid-template-columns: repeat(3, 1fr);
-          gap: 14px;
-          padding-top: 14px;
+          gap: 12px;
+          padding-top: 12px;
           border-top: 1px solid #fce7f3;
         }
         .thx-spotlight-img-wrap {
           width: 100%;
-          aspect-ratio: 4 / 3;
-          border-radius: 15px;
+          aspect-ratio: 16 / 10;
+          border-radius: 14px;
           overflow: hidden;
           background: #fff1f2;
           margin-bottom: 10px;
         }
-        .thx-ai-guide-box {
-          background: linear-gradient(135deg, #fff1f2 0%, #fffafb 65%, #ffffff 100%);
-          border: 1.5px solid #fecdd3;
-          border-radius: 20px;
-          padding: 18px 20px;
-          margin-bottom: 16px;
+        .thx-compact-filter-bar {
+          background: #ffffff;
+          border: 1.5px solid #fce7f3;
+          border-radius: 18px;
+          padding: 14px 16px;
+          margin-bottom: 18px;
+          box-shadow: 0 6px 20px rgba(15, 23, 42, 0.04);
         }
-        .thx-chip-row {
+        .thx-occasion-pills {
           display: flex;
+          align-items: center;
           gap: 8px;
           flex-wrap: wrap;
+          padding-bottom: 12px;
+          margin-bottom: 12px;
+          border-bottom: 1px solid #f3f4f6;
         }
-        .thx-filter-chip {
-          padding: 6px 13px;
-          border-radius: 999px;
-          font-size: 0.82rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.15s ease;
-          white-space: nowrap;
+        .thx-filter-controls-grid {
+          display: grid;
+          grid-template-columns: 1.3fr 1fr 0.9fr 1fr 1fr;
+          gap: 10px;
+          align-items: center;
         }
         .thx-home-products {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-          gap: 20px;
+          grid-template-columns: repeat(auto-fill, minmax(245px, 1fr));
+          gap: 18px;
         }
         .thx-home-prod-img {
-          height: 220px;
+          height: 215px;
+        }
+
+        @media (max-width: 900px) {
+          .thx-filter-controls-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
         }
 
         @media (max-width: 768px) {
           .thx-hero-section {
-            padding: 18px 0 24px;
+            padding: 16px 0 22px;
           }
           .thx-hero-grid {
             grid-template-columns: 1fr;
-            gap: 16px;
+            gap: 14px;
           }
           .thx-hero-title {
-            font-size: 1.5rem;
-            margin-bottom: 8px;
-          }
-          .thx-hero-desc {
-            font-size: 0.85rem;
-            margin-bottom: 14px;
+            font-size: 1.45rem;
           }
           .thx-hero-actions {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 8px;
-            margin-bottom: 14px;
           }
-          .thx-hero-actions > a,
           .thx-hero-actions > button {
             width: 100%;
             justify-content: center;
-            padding: 10px 8px !important;
+            padding: 9px 8px !important;
             font-size: 0.82rem !important;
           }
-          .thx-hero-stats {
-            gap: 8px;
-            padding-top: 10px;
-          }
-          .thx-ai-guide-box {
-            padding: 14px;
-            border-radius: 16px;
-          }
-          .thx-chip-row {
+          .thx-occasion-pills {
             flex-wrap: nowrap;
             overflow-x: auto;
-            padding-bottom: 4px;
             -webkit-overflow-scrolling: touch;
             scrollbar-width: none;
           }
-          .thx-chip-row::-webkit-scrollbar {
+          .thx-occasion-pills::-webkit-scrollbar {
             display: none;
           }
           .thx-home-products {
@@ -420,7 +438,78 @@ export default function HomePage() {
         }
       `}</style>
 
-      {/* Banner giới thiệu đầu trang */}
+      {/* Thanh Admin mỏng tách biệt hoàn toàn khỏi Hero của khách */}
+      {isActualAdmin && (
+        <div
+          style={{
+            background: '#111827',
+            color: '#f9fafb',
+            fontSize: '0.82rem',
+            padding: '8px 0',
+          }}
+        >
+          <div
+            className="container"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 10,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ShieldCheck size={15} color="#fb7185" />
+              <span>
+                {previewAsCustomer
+                  ? 'Đang xem thử giao diện như khách hàng'
+                  : 'Đang xem với quyền Admin'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <Link
+                to="/admin"
+                style={{
+                  color: '#fda4af',
+                  fontWeight: 700,
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                }}
+              >
+                <LayoutDashboard size={14} />
+                <span>Vào Bảng Quản Trị</span>
+              </Link>
+
+              <span style={{ color: '#4b5563' }}>&bull;</span>
+
+              <button
+                type="button"
+                onClick={() => setPreviewAsCustomer((v) => !v)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#e5e7eb',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: 0,
+                  fontSize: '0.82rem',
+                }}
+              >
+                <Eye size={14} />
+                <span>{previewAsCustomer ? 'Bật lại nút Admin' : 'Xem như khách'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hero Section thuần túy dành cho khách hàng, gọn chiều cao */}
       <section className="thx-hero-section">
         <div className="container thx-hero-grid">
           <div>
@@ -435,15 +524,11 @@ export default function HomePage() {
                 borderRadius: 999,
                 fontSize: '0.74rem',
                 fontWeight: 700,
-                marginBottom: 10,
+                marginBottom: 8,
               }}
             >
               <Sparkles size={13} />
-              <span>
-                {isAdmin
-                  ? 'Chế Độ Quản Trị Viên • Tiệm Hoa Xinh 2026'
-                  : 'Hoa Tươi Nhập Mới Mỗi Sáng • Tích Hợp Smart AI'}
-              </span>
+              <span>Bộ Sưu Tập Hoa Tươi 2026 &bull; Gợi Ý Chuẩn Gu</span>
             </div>
 
             <h1 className="thx-hero-title">
@@ -454,113 +539,74 @@ export default function HomePage() {
             </h1>
 
             <p className="thx-hero-desc">
-              {isAdmin
-                ? 'Kiểm tra nhanh danh mục hoa đang mở bán hoặc mở Bảng điều khiển để xử lý đơn hàng và dự báo nhập hàng.'
-                : 'Những thiết kế hoa bó, giỏ hoa và kệ khai trương được tuyển chọn tỉ mỉ mỗi ngày, giúp bạn gửi trọn lời chúc tinh tế đến người thương.'}
+              Những thiết kế hoa bó, giỏ hoa và kệ khai trương được cắm mới mỗi ngày, gửi trọn lời chúc tinh tế đến người thương trong mọi dịp đặc biệt.
             </p>
 
-            {isAdmin ? (
-              <div className="thx-hero-actions">
-                <Link
-                  to="/admin"
-                  className="btn btn-primary"
-                  style={{
-                    padding: '11px 20px',
-                    fontSize: '0.92rem',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                  }}
-                >
-                  <LayoutDashboard size={17} />
-                  <span>Bảng Quản Trị</span>
-                </Link>
+            <div className="thx-hero-actions">
+              <button
+                type="button"
+                onClick={() =>
+                  catalogRef.current?.scrollIntoView({ behavior: 'smooth' })
+                }
+                className="btn btn-primary"
+                style={{
+                  padding: '10px 20px',
+                  fontSize: '0.9rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 7,
+                }}
+              >
+                <span>Khám phá mẫu hoa</span>
+                <ArrowDown size={15} />
+              </button>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    catalogRef.current?.scrollIntoView({ behavior: 'smooth' })
-                  }
-                  className="btn btn-outline"
-                  style={{
-                    padding: '11px 20px',
-                    fontSize: '0.92rem',
-                    background: '#ffffff',
-                    borderColor: '#fecdd3',
-                    color: '#be123c',
-                    fontWeight: 700,
-                  }}
-                >
-                  Xem danh mục hoa
-                </button>
-              </div>
-            ) : (
-              <div className="thx-hero-actions">
-                <button
-                  type="button"
-                  onClick={() =>
-                    catalogRef.current?.scrollIntoView({ behavior: 'smooth' })
-                  }
-                  className="btn btn-primary"
-                  style={{
-                    padding: '11px 20px',
-                    fontSize: '0.92rem',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 7,
-                  }}
-                >
-                  <span>Chọn mẫu hoa ngay</span>
-                  <ArrowDown size={16} />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveNavCat('sinh-nhat');
-                    catalogRef.current?.scrollIntoView({ behavior: 'smooth' });
-                  }}
-                  className="btn btn-outline"
-                  style={{
-                    padding: '11px 20px',
-                    fontSize: '0.92rem',
-                    background: '#ffffff',
-                    borderColor: '#fecdd3',
-                    color: '#be123c',
-                    fontWeight: 700,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 7,
-                  }}
-                >
-                  <Sparkles size={16} />
-                  <span>Gợi ý hoa theo dịp</span>
-                </button>
-              </div>
-            )}
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNavCat('sinh-nhat');
+                  catalogRef.current?.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="btn btn-outline"
+                style={{
+                  padding: '10px 18px',
+                  fontSize: '0.9rem',
+                  background: '#ffffff',
+                  borderColor: '#fecdd3',
+                  color: '#be123c',
+                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 7,
+                }}
+              >
+                <Sparkles size={15} />
+                <span>Gợi ý hoa theo dịp</span>
+              </button>
+            </div>
 
             <div className="thx-hero-stats">
               <div>
-                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#111827' }}>
-                  Miễn Phí
+                <div style={{ fontSize: '1.12rem', fontWeight: 800, color: '#111827' }}>
+                  {products.length > 0 ? `${products.length}+ Mẫu` : '20+ Mẫu'}
                 </div>
-                <div style={{ fontSize: '0.78rem', color: '#6b7280' }}>
-                  Thiệp &amp; Banner thiết kế
-                </div>
-              </div>
-              <div>
-                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#111827' }}>
-                  Smart AI
-                </div>
-                <div style={{ fontSize: '0.78rem', color: '#6b7280' }}>
-                  Gợi ý mẫu hoa chuẩn gu
+                <div style={{ fontSize: '0.76rem', color: '#6b7280' }}>
+                  Thiết kế hoa nghệ thuật
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#111827' }}>
+                <div style={{ fontSize: '1.12rem', fontWeight: 800, color: '#111827' }}>
+                  4.9 &#9733;
+                </div>
+                <div style={{ fontSize: '0.76rem', color: '#6b7280' }}>
+                  Đánh giá từ khách hàng
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '1.12rem', fontWeight: 800, color: '#111827' }}>
                   2 Giờ
                 </div>
-                <div style={{ fontSize: '0.78rem', color: '#6b7280' }}>
+                <div style={{ fontSize: '0.76rem', color: '#6b7280' }}>
                   Giao hoa tận tay
                 </div>
               </div>
@@ -572,20 +618,16 @@ export default function HomePage() {
               className="panel"
               style={{
                 width: '100%',
-                maxWidth: 420,
-                padding: 14,
-                borderRadius: 22,
-                boxShadow: '0 20px 45px rgba(225, 29, 72, 0.1)',
+                maxWidth: 400,
+                padding: 12,
+                borderRadius: 20,
+                boxShadow: '0 16px 38px rgba(225, 29, 72, 0.1)',
                 background: '#ffffff',
               }}
             >
               <div className="thx-spotlight-img-wrap">
                 <img
-                  src={
-                    spotlightProduct
-                      ? getFlowerImage(spotlightProduct)
-                      : 'https://images.unsplash.com/photo-1526047932273-341f2a7631f9?auto=format&fit=crop&w=800&q=80'
-                  }
+                  src={spotlightImageUrl}
                   alt={spotlightProduct?.tenSanPham || 'Bó Hồng Pastel Công Chúa'}
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
@@ -603,7 +645,7 @@ export default function HomePage() {
                   <div
                     style={{
                       fontWeight: 700,
-                      fontSize: '0.95rem',
+                      fontSize: '0.94rem',
                       color: '#111827',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -612,8 +654,8 @@ export default function HomePage() {
                   >
                     {spotlightProduct?.tenSanPham || 'Bó Hồng Pastel Công Chúa'}
                   </div>
-                  <div style={{ fontSize: '0.77rem', color: '#6b7280', marginTop: 2 }}>
-                    Thiết kế bán chạy nhất mùa lễ
+                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: 1 }}>
+                    Mẫu hoa được yêu thích nhất
                   </div>
                 </div>
 
@@ -634,27 +676,27 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Khu vực Bộ Lọc Thông Minh & Toàn Bộ Danh Sách Hoa Tươi */}
+      {/* Khu vực Bộ Lọc Thu Gọn & Danh Sách Sản Phẩm */}
       <section
         id="catalog"
         ref={catalogRef}
         className="container"
-        style={{ paddingTop: 32, marginBottom: 72, scrollMarginTop: 120 }}
+        style={{ paddingTop: 24, marginBottom: 72, scrollMarginTop: 115 }}
       >
         <div
           style={{
             display: 'flex',
             justifyContent: 'space-between',
-            alignItems: 'flex-end',
+            alignItems: 'center',
             flexWrap: 'wrap',
             gap: 10,
-            marginBottom: 16,
+            marginBottom: 14,
           }}
         >
           <div>
-            <h2 style={{ fontSize: '1.65rem', marginBottom: 4 }}>{activeHeadingTitle}</h2>
-            <p style={{ fontSize: '0.88rem', color: '#6b7280' }}>
-              Bấm vào bất kỳ mẫu hoa nào để xem đánh giá thực tế và hệ thống AI gợi ý mẫu đồng điệu
+            <h2 style={{ fontSize: '1.5rem', marginBottom: 2 }}>{activeHeadingTitle}</h2>
+            <p style={{ fontSize: '0.84rem', color: '#6b7280' }}>
+              Hiển thị <b>{filteredProducts.length}</b> mẫu hoa &bull; Bấm vào từng bó hoa để xem gợi ý phối hoa từ AI
             </p>
           </div>
 
@@ -666,200 +708,103 @@ export default function HomePage() {
               style={{ color: '#be123c', borderColor: '#fecdd3', background: '#fff1f2' }}
             >
               <RotateCcw size={14} />
-              <span>Xóa bộ lọc ({filteredProducts.length} mẫu)</span>
+              <span>Xóa lọc ({filteredProducts.length} kết quả)</span>
             </button>
           )}
         </div>
 
-        <div className="thx-ai-guide-box">
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              marginBottom: 12,
-            }}
-          >
+        {/* Thanh lọc gọn gàng: Dịp tặng + 5 ô lọc ngang */}
+        <div className="thx-compact-filter-bar">
+          <div className="thx-occasion-pills">
             <span
               style={{
-                width: 28,
-                height: 28,
-                borderRadius: 9,
-                background: '#e11d48',
-                color: '#ffffff',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                color: '#be123c',
                 display: 'inline-flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Sparkles size={15} />
-            </span>
-            <div style={{ fontWeight: 800, fontSize: '0.96rem', color: '#be123c' }}>
-              Smart AI • Lọc Nhanh Theo Dịp Tặng, Ngân Sách &amp; Tông Màu
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 10 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
                 gap: 5,
-                fontSize: '0.79rem',
-                fontWeight: 700,
-                color: '#374151',
-                marginBottom: 6,
+                marginRight: 4,
+                whiteSpace: 'nowrap',
               }}
             >
-              <Gift size={13} color="#e11d48" />
+              <Sparkles size={14} />
               <span>Dịp tặng:</span>
-            </div>
-            <div className="thx-chip-row">
-              {OCCASION_OPTIONS.map((occ) => {
-                const active = activeNavCat === occ.id && !subQuery;
-                return (
-                  <button
-                    key={occ.id || 'all-occ'}
-                    type="button"
-                    onClick={() => {
-                      setActiveNavCat(occ.id);
-                      setSubQuery('');
-                      setSubLabel('');
-                    }}
-                    className="thx-filter-chip"
-                    style={{
-                      border: active ? '1.5px solid #e11d48' : '1px solid #e5e7eb',
-                      background: active ? '#e11d48' : '#ffffff',
-                      color: active ? '#ffffff' : '#374151',
-                    }}
-                  >
-                    {occ.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+            </span>
 
-          <div style={{ marginBottom: uniqueColors.length > 0 ? 10 : 0 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                fontSize: '0.79rem',
-                fontWeight: 700,
-                color: '#374151',
-                marginBottom: 6,
-              }}
-            >
-              <Wallet size={13} color="#e11d48" />
-              <span>Ngân sách:</span>
-            </div>
-            <div className="thx-chip-row">
-              {BUDGET_OPTIONS.map((b) => {
-                const active = selectedBudget === b.id;
-                return (
-                  <button
-                    key={b.id || 'all-budget'}
-                    type="button"
-                    onClick={() => setSelectedBudget(b.id)}
-                    className="thx-filter-chip"
-                    style={{
-                      border: active ? '1.5px solid #be123c' : '1px solid #e5e7eb',
-                      background: active ? '#ffe4e6' : '#ffffff',
-                      color: active ? '#be123c' : '#374151',
-                    }}
-                  >
-                    {b.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {uniqueColors.length > 0 && (
-            <div>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  fontSize: '0.79rem',
-                  fontWeight: 700,
-                  color: '#374151',
-                  marginBottom: 6,
-                }}
-              >
-                <Palette size={13} color="#e11d48" />
-                <span>Tông màu sắc:</span>
-              </div>
-              <div className="thx-chip-row">
+            {OCCASION_OPTIONS.map((occ) => {
+              const active = activeNavCat === occ.id && !subQuery;
+              return (
                 <button
+                  key={occ.id || 'all-occ'}
                   type="button"
-                  onClick={() => setSelectedColor('')}
-                  className="thx-filter-chip"
+                  onClick={() => {
+                    setActiveNavCat(occ.id);
+                    setSubQuery('');
+                    setSubLabel('');
+                  }}
                   style={{
-                    border: !selectedColor ? '1.5px solid #be123c' : '1px solid #e5e7eb',
-                    background: !selectedColor ? '#ffe4e6' : '#ffffff',
-                    color: !selectedColor ? '#be123c' : '#374151',
+                    padding: '6px 13px',
+                    borderRadius: 999,
+                    fontSize: '0.81rem',
+                    fontWeight: 600,
+                    border: active ? '1.5px solid #e11d48' : '1px solid #e5e7eb',
+                    background: active ? '#e11d48' : '#ffffff',
+                    color: active ? '#ffffff' : '#374151',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  Tất cả màu
+                  {occ.label}
                 </button>
-                {uniqueColors.map((col) => {
-                  const active = selectedColor === col;
-                  return (
-                    <button
-                      key={col}
-                      type="button"
-                      onClick={() => setSelectedColor(col)}
-                      className="thx-filter-chip"
-                      style={{
-                        border: active ? '1.5px solid #be123c' : '1px solid #e5e7eb',
-                        background: active ? '#ffe4e6' : '#ffffff',
-                        color: active ? '#be123c' : '#374151',
-                      }}
-                    >
-                      {col}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
+              );
+            })}
+          </div>
 
-        <div
-          className="panel"
-          style={{
-            marginBottom: 20,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(195px, 1fr))',
-            gap: 12,
-            alignItems: 'end',
-          }}
-        >
-          <div>
-            <label className="form-label">Tìm kiếm tên hoa</label>
+          <div className="thx-filter-controls-grid">
             <div style={{ position: 'relative' }}>
               <Search
                 size={15}
                 color="#9ca3af"
-                style={{ position: 'absolute', left: 11, top: 12 }}
+                style={{ position: 'absolute', left: 11, top: 11 }}
               />
               <input
                 type="text"
                 className="form-control"
-                style={{ paddingLeft: 34 }}
-                placeholder="Hồng đỏ, hướng dương, tulip..."
+                style={{ paddingLeft: 33, height: 38, fontSize: '0.85rem' }}
+                placeholder="Tìm tên hoa..."
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
               />
             </div>
-          </div>
 
-          <div>
-            <label className="form-label">Kiểu thiết kế</label>
+            <select
+              className="form-control"
+              value={selectedBudget}
+              onChange={(e) => setSelectedBudget(e.target.value)}
+              style={{ height: 38, fontSize: '0.85rem' }}
+            >
+              {BUDGET_OPTIONS.map((b) => (
+                <option key={b.id || 'all-b'} value={b.id}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+
+            <select
+              className="form-control"
+              value={selectedColor}
+              onChange={(e) => setSelectedColor(e.target.value)}
+              style={{ height: 38, fontSize: '0.85rem' }}
+            >
+              <option value="">Tất cả màu sắc</option>
+              {STANDARD_COLORS.map((col) => (
+                <option key={col} value={col}>
+                  Màu {col}
+                </option>
+              ))}
+            </select>
+
             <select
               className="form-control"
               value={selectedCategory}
@@ -868,47 +813,32 @@ export default function HomePage() {
                 setSubQuery('');
                 setSubLabel('');
               }}
+              style={{ height: 38, fontSize: '0.85rem' }}
             >
-              <option value="">Tất cả kiểu thiết kế</option>
+              <option value="">Tất cả kiểu hoa</option>
               {categories.map((c) => (
                 <option key={c.maDanhMuc} value={c.maDanhMuc}>
                   {c.tenDanhMuc}
                 </option>
               ))}
             </select>
-          </div>
 
-          <div>
-            <label className="form-label">Sắp xếp theo</label>
             <select
               className="form-control"
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
+              style={{ height: 38, fontSize: '0.85rem' }}
             >
-              <option value="default">Mặc định</option>
-              <option value="newest">Sản phẩm mới nhất</option>
+              <option value="default">Sắp xếp: Mặc định</option>
+              <option value="bestseller">Bán chạy nhất</option>
+              <option value="newest">Mới nhất</option>
               <option value="price-asc">Giá: Thấp đến Cao</option>
               <option value="price-desc">Giá: Cao đến Thấp</option>
             </select>
           </div>
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            marginBottom: 16,
-            fontSize: '0.88rem',
-            color: '#6b7280',
-          }}
-        >
-          <SlidersHorizontal size={15} />
-          <span>
-            Hiển thị <b>{filteredProducts.length}</b> mẫu hoa phù hợp
-          </span>
-        </div>
-
+        {/* Lưới sản phẩm */}
         {loading ? (
           <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
             Đang tải danh sách mẫu hoa...
@@ -924,12 +854,15 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="thx-home-products">
-            {filteredProducts.map((sp) => {
+            {filteredProducts.map((sp, idx) => {
               const stock = Number(sp.soLuongTon ?? 20);
               const isOutOfStock = stock <= 0;
               const isLowStock = stock > 0 && stock <= 5;
               const isLiked = wishlistIds.includes(sp.maSanPham);
               const ratingStats = getProductRatingStats(sp.maSanPham);
+              const cleanColorLabel = normalizeColorGroup(sp.tongMauSac);
+              const promoTag =
+                idx < 3 ? 'Bán chạy' : sp.maSanPham >= 20 ? 'Mới' : '';
 
               return (
                 <div
@@ -958,21 +891,43 @@ export default function HomePage() {
                         />
                       </Link>
 
-                      <span
+                      <div
                         style={{
                           position: 'absolute',
                           top: 8,
                           left: 8,
-                          background: 'rgba(255, 255, 255, 0.94)',
-                          color: '#be123c',
-                          padding: '2px 9px',
-                          borderRadius: 999,
-                          fontSize: '0.71rem',
-                          fontWeight: 700,
+                          display: 'flex',
+                          gap: 5,
+                          flexWrap: 'wrap',
                         }}
                       >
-                        {sp.tongMauSac || 'Tông Hồng'}
-                      </span>
+                        {promoTag && (
+                          <span
+                            style={{
+                              background: promoTag === 'Bán chạy' ? '#e11d48' : '#16a34a',
+                              color: '#ffffff',
+                              padding: '2px 8px',
+                              borderRadius: 999,
+                              fontSize: '0.68rem',
+                              fontWeight: 700,
+                            }}
+                          >
+                            {promoTag}
+                          </span>
+                        )}
+                        <span
+                          style={{
+                            background: 'rgba(255, 255, 255, 0.94)',
+                            color: '#be123c',
+                            padding: '2px 8px',
+                            borderRadius: 999,
+                            fontSize: '0.69rem',
+                            fontWeight: 700,
+                          }}
+                        >
+                          {cleanColorLabel}
+                        </span>
+                      </div>
 
                       <button
                         type="button"
@@ -1031,7 +986,7 @@ export default function HomePage() {
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: 3,
-                          color: '#d97706',
+                          color: '#f59e0b',
                           fontWeight: 700,
                         }}
                       >
@@ -1078,14 +1033,18 @@ export default function HomePage() {
                       borderTop: '1px solid #f3f4f6',
                     }}
                   >
-                    <span style={{ fontWeight: 800, color: '#e11d48', fontSize: '0.98rem' }}>
+                    <span style={{ fontWeight: 800, color: '#111827', fontSize: '0.98rem' }}>
                       {formatVND(sp.giaBan)}
                     </span>
 
-                    {isAdmin ? (
-                      <Link to="/admin" className="btn btn-outline btn-sm">
+                    {showAdminTools ? (
+                      <Link
+                        to={`/admin?editProduct=${sp.maSanPham}`}
+                        className="btn btn-outline btn-sm"
+                        style={{ borderColor: '#fecdd3', color: '#be123c' }}
+                      >
                         <Settings size={14} />
-                        <span>Quản lý</span>
+                        <span>Sửa mẫu</span>
                       </Link>
                     ) : (
                       <button

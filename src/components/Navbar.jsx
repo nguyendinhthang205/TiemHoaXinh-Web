@@ -14,6 +14,7 @@ import {
   ChevronDown,
   ClipboardList,
   Ticket,
+  Store,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -71,16 +72,6 @@ export const STORE_CATEGORY_MENU = [
       { label: 'HOA CƯỚI CẦM TAY', dm: '5' },
     ],
   },
-  {
-    id: 'hoa-tuoi',
-    label: 'HOA TƯƠI',
-    subItems: [
-      { label: 'HOA HỒNG', query: 'hồng' },
-      { label: 'HOA HƯỚNG DƯƠNG', query: 'hướng dương' },
-      { label: 'HOA TULIP', query: 'tulip' },
-      { label: 'HOA BABY TRẮNG', query: 'baby' },
-    ],
-  },
 ];
 
 export default function Navbar() {
@@ -95,6 +86,8 @@ export default function Navbar() {
   const [expandedMobileCat, setExpandedMobileCat] = useState('');
   const [hoveredCat, setHoveredCat] = useState(null);
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
+
+  const isAdminRoute = location.pathname.startsWith('/admin');
 
   const roleStr = String(
     user?.vaiTro || user?.role || user?.quyen || ''
@@ -169,6 +162,101 @@ export default function Navbar() {
     navigate('/login');
   };
 
+  // Trên trang Quản trị & Dự báo AI: Ẩn toàn bộ banner cửa hàng, chỉ giữ thanh điều hướng nội bộ gọn gàng
+  if (isAdminRoute) {
+    return (
+      <header
+        style={{
+          background: '#ffffff',
+          borderBottom: '1px solid #fce7f3',
+          position: 'sticky',
+          top: 0,
+          zIndex: 60,
+        }}
+      >
+        <div
+          className="container"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            height: 48,
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <Link
+              to="/"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                color: '#374151',
+                textDecoration: 'none',
+                fontWeight: 600,
+                fontSize: '0.84rem',
+              }}
+            >
+              <Store size={15} color="#e11d48" />
+              <span>Xem trang cửa hàng</span>
+            </Link>
+
+            <span style={{ color: '#e5e7eb' }}>|</span>
+
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                color: '#e11d48',
+                fontWeight: 700,
+                fontSize: '0.84rem',
+              }}
+            >
+              <LayoutDashboard size={15} />
+              <span>Quản trị &amp; AI Dự báo</span>
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: '0.84rem' }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontWeight: 700,
+                color: '#111827',
+              }}
+            >
+              <ShieldCheck size={15} color="#e11d48" />
+              <span>Quản trị viên</span>
+            </span>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                background: 'transparent',
+                border: 'none',
+                color: '#e11d48',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontSize: '0.84rem',
+              }}
+            >
+              <LogOut size={14} />
+              <span>Đăng xuất</span>
+            </button>
+          </div>
+        </div>
+      </header>
+    );
+  }
+
   return (
     <>
       <header
@@ -221,7 +309,7 @@ export default function Navbar() {
             grid-template-columns: 1fr auto 1fr;
             align-items: center;
             gap: 16px;
-            height: 74px;
+            height: 70px;
           }
           .thx-header-tagline {
             display: flex;
@@ -283,7 +371,7 @@ export default function Navbar() {
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 26px;
+            gap: 28px;
             height: 44px;
           }
           .thx-cat-item {
@@ -300,19 +388,16 @@ export default function Navbar() {
             background: transparent;
             border: none;
             border-bottom: 2.5px solid transparent;
-            font-size: 0.81rem;
+            font-size: 0.82rem;
             font-weight: 700;
             letter-spacing: 0.03em;
-            color: #1f2937;
             cursor: pointer;
             padding: 0 2px;
             white-space: nowrap;
-            transition: all 0.15s ease;
+            transition: color 0.15s ease, border-color 0.15s ease;
           }
-          .thx-cat-trigger:hover,
-          .thx-cat-trigger.active {
-            color: #e11d48;
-            border-bottom-color: #e11d48;
+          .thx-cat-trigger:hover {
+            color: #e11d48 !important;
           }
           .thx-cat-dropdown {
             position: absolute;
@@ -395,7 +480,7 @@ export default function Navbar() {
           }
         `}</style>
 
-        {/* 1. Thanh tiện ích trên cùng (Desktop - đã lược bỏ Hotline & Nhắn tin Admin) */}
+        {/* 1. Thanh tiện ích trên cùng */}
         <div className="thx-top-utility">
           <div className="container thx-top-utility-inner">
             <span
@@ -463,7 +548,7 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* 2. Hàng thương hiệu giữa + Ô tìm kiếm & Giỏ hàng hồng bên phải (Desktop) */}
+        {/* 2. Hàng thương hiệu giữa + Tìm kiếm & Giỏ hàng */}
         <div className="container thx-main-header-row">
           <div className="thx-header-tagline">
             <span
@@ -476,7 +561,7 @@ export default function Navbar() {
                 fontSize: '0.74rem',
               }}
             >
-              Giao hoa nhanh 2H &bull; Tặng thiệp miễn phí
+              Hoa tươi tuyển chọn mỗi sáng
             </span>
           </div>
 
@@ -575,12 +660,14 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* 3. Thanh danh mục ngang chuẩn mẫu (Desktop) */}
+        {/* 3. Thanh danh mục ngang 6 mục chuẩn (Bấm vào chữ từ đen chuyển sang đỏ rõ ràng) */}
         <nav className="thx-cat-bar-wrap" aria-label="Danh mục hoa tươi">
           <div className="container thx-cat-bar">
             {STORE_CATEGORY_MENU.map((cat) => {
               const isSelected =
-                location.pathname === '/' && activeCat === cat.id;
+                (location.pathname === '/' || location.pathname === '/shop') &&
+                activeCat === cat.id;
+
               return (
                 <div
                   key={cat.id || 'all'}
@@ -591,7 +678,11 @@ export default function Navbar() {
                   <button
                     type="button"
                     onClick={() => handleSelectCategory(cat.id)}
-                    className={`thx-cat-trigger ${isSelected ? 'active' : ''}`}
+                    className="thx-cat-trigger"
+                    style={{
+                      color: isSelected ? '#e11d48' : '#1f2937',
+                      borderBottomColor: isSelected ? '#e11d48' : 'transparent',
+                    }}
                   >
                     <span>{cat.label}</span>
                     {cat.subItems.length > 0 && <ChevronDown size={13} />}
@@ -745,7 +836,7 @@ export default function Navbar() {
         )}
       </header>
 
-      {/* Ngăn kéo danh mục & tài khoản trên điện thoại (Overlay Drawer) */}
+      {/* Ngăn kéo danh mục & tài khoản trên điện thoại */}
       {mobileMenuOpen && (
         <>
           <div

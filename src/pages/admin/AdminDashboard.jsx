@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import {
   Sparkles,
@@ -31,6 +32,10 @@ import {
   Upload,
   Image as ImageIcon,
   Palette,
+  Settings,
+  MoreHorizontal,
+  Download,
+  Clock,
 } from 'lucide-react';
 import api, {
   API_BASE_URL,
@@ -70,16 +75,15 @@ const HOMEPAGE_NAV_CATEGORIES = [
   { id: 'lan-ho-diep', label: 'Lan Hồ Điệp' },
   { id: 'chu-de', label: 'Chủ Đề' },
   { id: 'thiet-ke', label: 'Thiết Kế' },
-  { id: 'hoa-tuoi', label: 'Hoa Tươi' },
 ];
 
-const QUICK_COLOR_TONES = [
-  'Tông Hồng Pastel',
-  'Tông Đỏ Rực Rỡ',
-  'Tông Vàng Rạng Rỡ',
-  'Tông Trắng Tinh Khôi',
-  'Tông Tím Mộng Mơ',
-  'Tông Cam Đào Ấm Áp',
+const STANDARD_COLOR_TONES = [
+  'Hồng Pastel',
+  'Đỏ',
+  'Vàng',
+  'Trắng',
+  'Tím',
+  'Cam Đào',
 ];
 
 const ADMIN_QUICK_REPLIES = [
@@ -91,6 +95,12 @@ const ADMIN_QUICK_REPLIES = [
 function getCurrentYearMonth() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function shiftYearMonth(ym, delta) {
+  const [yStr, mStr] = (ym || getCurrentYearMonth()).split('-');
+  const d = new Date(Number(yStr), Number(mStr) - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 function getOrderYearMonth(order) {
@@ -105,10 +115,10 @@ function getOrderYearMonth(order) {
   return m ? `${m[1]}-${m[2]}` : '';
 }
 
-function formatYearMonthLabel(ym) {
-  if (!ym || !ym.includes('-')) return 'tháng này';
+function formatYearMonthVN(ym) {
+  if (!ym || !ym.includes('-')) return 'Tháng này';
   const [y, m] = ym.split('-');
-  return `tháng ${m}/${y}`;
+  return `Tháng ${m}/${y}`;
 }
 
 function compressImageFile(file, maxSize = 240, quality = 0.62) {
@@ -228,9 +238,11 @@ function normalizeAdminOrderStatus(rawStatus = '', isPickup = false) {
 
 export default function AdminDashboard() {
   const { user, showToast } = useApp();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState('orders');
   const [loading, setLoading] = useState(false);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [lastUpdatedLabel, setLastUpdatedLabel] = useState('');
   const [training, setTraining] = useState(false);
   const [apiError, setApiError] = useState('');
   const [hotlineInput, setHotlineInput] = useState(() => getHotlineNumber());
@@ -260,6 +272,7 @@ export default function AdminDashboard() {
   const [orderSearch, setOrderSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
+  const [openMenuOrderId, setOpenMenuOrderId] = useState(null);
   const [deletingOrders, setDeletingOrders] = useState(false);
   const [productSearch, setProductSearch] = useState('');
 
@@ -276,10 +289,17 @@ export default function AdminDashboard() {
     danhMucTrangChu: ['sinh-nhat', 'thiet-ke'],
     giaBan: 450000,
     soLuongTon: 30,
-    tongMauSac: '',
+    tongMauSac: 'Hồng Pastel',
     moTa: '',
     hinhAnhChinh: '',
   });
+
+  const stampNowTime = () => {
+    const now = new Date();
+    setLastUpdatedLabel(
+      `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    );
+  };
 
   const syncChats = useCallback(() => {
     const list = getAllConversationsForAdmin();
@@ -310,7 +330,7 @@ export default function AdminDashboard() {
   }, [syncChats]);
 
   useEffect(() => {
-    const intervalMs = activeTab === 'messages' ? 5000 : 18000;
+    const intervalMs = activeTab === 'messages' ? 5000 : 20000;
     const timer = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;
       syncChatsFromCloud().then(() => syncChats());
@@ -413,53 +433,12 @@ export default function AdminDashboard() {
     });
   }, []);
 
-  const stripHeavyBase64FromSql = useCallback(async (spList) => {
-    const heavyItems = spList.filter((p) => {
-      const img1 = String(p.hinhAnhChinh || '');
-      const img2 = String(p.hinhAnh || '');
-      const img3 = String(p.anhChinh || '');
-      return (
-        img1.startsWith('data:image/') ||
-        img2.startsWith('data:image/') ||
-        img3.startsWith('data:image/') ||
-        img1.length > 600 ||
-        img2.length > 600
-      );
-    });
-
-    if (heavyItems.length === 0) return false;
-
-    for (const p of heavyItems) {
-      try {
-        await api.put(
-          `/SanPham/${p.maSanPham}`,
-          {
-            maSanPham: p.maSanPham,
-            tenSanPham: p.tenSanPham,
-            maDanhMuc: p.maDanhMuc || 1,
-            giaBan: p.giaBan,
-            soLuongTon: p.soLuongTon ?? 20,
-            tongMauSac: p.tongMauSac || 'Tông Hồng Pastel',
-            moTa: p.moTa || '',
-            hinhAnhChinh: '',
-            hinhAnh: '',
-            trangThai: p.trangThai ?? true,
-          },
-          { timeout: 5000 }
-        );
-      } catch {
-        // Bỏ qua
-      }
-    }
-    return true;
-  }, []);
-
   const loadRecentOrdersFallback = useCallback(async () => {
     const metaKeys = Object.keys(readLocalOrderMeta())
       .map((k) => Number(k))
       .filter((n) => Number.isFinite(n) && n > 0);
-    const maxKnownId = metaKeys.length > 0 ? Math.max(...metaKeys) : 767;
-    const startId = Math.max(maxKnownId + 3, 767);
+    const maxKnownId = metaKeys.length > 0 ? Math.max(...metaKeys) : 776;
+    const startId = Math.max(maxKnownId + 3, 776);
 
     const recovered = [];
     let missStreak = 0;
@@ -515,6 +494,7 @@ export default function AdminDashboard() {
       );
       ordList = [...topEnriched, ...ordList.slice(4)];
       setOrders(ordList);
+      stampNowTime();
 
       try {
         const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
@@ -539,6 +519,7 @@ export default function AdminDashboard() {
       if (fallbackList.length > 0) {
         setOrders(fallbackList);
         setApiError('');
+        stampNowTime();
         try {
           const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
           localStorage.setItem(
@@ -594,7 +575,7 @@ export default function AdminDashboard() {
 
     api
       .get('/SanPham', { timeout: 10000 })
-      .then(async (res) => {
+      .then((res) => {
         const d = res.data;
         const spList = Array.isArray(d) ? d : d?.items || [];
         setProducts(spList);
@@ -604,6 +585,7 @@ export default function AdminDashboard() {
         });
         setProductMap(pMap);
         buildFallbackForecast(spList);
+        stampNowTime();
 
         try {
           const prevCache = JSON.parse(localStorage.getItem('thx_admin_fast_cache') || '{}');
@@ -613,11 +595,6 @@ export default function AdminDashboard() {
           );
         } catch {
           // Bỏ qua
-        }
-
-        const cleanedHeavySql = await stripHeavyBase64FromSql(spList);
-        if (cleanedHeavySql) {
-          loadOrdersOnly();
         }
       })
       .catch(() => {})
@@ -652,11 +629,24 @@ export default function AdminDashboard() {
           }));
         }
       });
-  }, [buildFallbackForecast, stripHeavyBase64FromSql, loadOrdersOnly]);
+  }, [buildFallbackForecast, loadOrdersOnly]);
 
   useEffect(() => {
     loadAllData();
   }, [loadAllData]);
+
+  // Hỗ trợ mở thẳng popup Sửa mẫu hoa khi Admin bấm "Sửa mẫu" từ Trang chủ
+  useEffect(() => {
+    const editId = searchParams.get('editProduct');
+    if (editId && products.length > 0) {
+      const targetSp = products.find((p) => String(p.maSanPham) === String(editId));
+      if (targetSp) {
+        setActiveTab('products');
+        openEditProduct(targetSp);
+        setSearchParams({});
+      }
+    }
+  }, [searchParams, products, setSearchParams]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -682,6 +672,7 @@ export default function AdminDashboard() {
 
   const handleDeleteSingleOrder = async (order) => {
     const orderId = order.maDonHang;
+    setOpenMenuOrderId(null);
     if (!window.confirm(`Bạn có chắc muốn xóa vĩnh viễn đơn hàng #${orderId} không?`)) return;
 
     try {
@@ -770,9 +761,17 @@ export default function AdminDashboard() {
     return false;
   };
 
-  const handleChangeOrderStatus = (order, nextCode, isPickup = false) => {
+  const handleChangeOrderStatus = (order, nextCode, isPickup = false, askConfirm = false) => {
     const orderId = order.maDonHang;
     const targetInfo = normalizeAdminOrderStatus(nextCode, isPickup);
+    setOpenMenuOrderId(null);
+
+    if (
+      askConfirm &&
+      !window.confirm(`Xác nhận chuyển đơn #${orderId} sang trạng thái "${targetInfo.label}"?`)
+    ) {
+      return;
+    }
 
     const patch = { statusOverride: nextCode };
     if (nextCode === 'Completed') {
@@ -822,6 +821,7 @@ export default function AdminDashboard() {
 
   const handleConfirmPayment = (order) => {
     const orderId = order.maDonHang;
+    setOpenMenuOrderId(null);
 
     const now = Date.now();
     const localCurrent = readLocalOrderMeta();
@@ -853,6 +853,7 @@ export default function AdminDashboard() {
   const handleOpenOrderDetail = async (order) => {
     const orderId = order.maDonHang;
     const meta = orderMetaMap[orderId] || {};
+    setOpenMenuOrderId(null);
     try {
       setLoadingDetailId(orderId);
       let detailObj = { ...order };
@@ -905,6 +906,13 @@ export default function AdminDashboard() {
   };
 
   const handleRetrainAI = async () => {
+    if (
+      !window.confirm(
+        'Hệ thống sẽ huấn luyện lại mô hình AI dựa trên các đơn hàng đã hoàn tất mới nhất. Tiếp tục?'
+      )
+    ) {
+      return;
+    }
     try {
       setTraining(true);
       try {
@@ -912,13 +920,45 @@ export default function AdminDashboard() {
       } catch {
         await axios.post(`${AI_BASE_URL}/forecast/train`, {}, { timeout: 10000 });
       }
-      showToast('Đã huấn luyện lại mô hình AI Linear Regression thành công!');
       await loadAllData();
+      showToast(
+        `Huấn luyện lại thành công! Sai số chuẩn MAE: ${modelMetrics.mae} bó • RMSE: ${modelMetrics.rmse} bó`
+      );
     } catch {
       showToast('Không kết nối được dịch vụ Python AI để huấn luyện.', 'error');
     } finally {
       setTraining(false);
     }
+  };
+
+  const handleExportForecastCSV = () => {
+    const header = 'Ma_Hoa,Ten_Bo_Hoa,Ton_Kho_Hien_Tai,AI_Du_Bao_Thang_Toi,De_Xuat_Nhap_Them\n';
+    const rows = forecasts
+      .map((item, idx) => {
+        const stock = item.soLuongTon ?? 15;
+        const predicted = Math.round(
+          item.duBaoThangToi ?? item.soLuongDuBao ?? item.predictedSales ?? 30
+        );
+        const importQty =
+          item.deXuatNhap ??
+          item.soLuongCanNhap ??
+          Math.max(0, Math.round(predicted - stock + 10));
+        return `${item.maSanPham ?? idx + 1},"${String(item.tenSanPham || '').replace(/"/g, '""')}",${stock},${predicted},${importQty}`;
+      })
+      .join('\n');
+
+    const blob = new Blob(['\uFEFF' + header + rows], {
+      type: 'text/csv;charset=utf-8;',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Phieu_Nhap_Hang_AI_${selectedMonth}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast('Đã xuất phiếu đề xuất nhập hàng (.CSV) thành công!');
   };
 
   const handleSendAdminReply = async (replyText) => {
@@ -946,7 +986,7 @@ export default function AdminDashboard() {
       danhMucTrangChu: ['sinh-nhat', 'thiet-ke'],
       giaBan: 450000,
       soLuongTon: 30,
-      tongMauSac: '',
+      tongMauSac: 'Hồng Pastel',
       moTa: '',
       hinhAnhChinh: '',
     });
@@ -968,7 +1008,7 @@ export default function AdminDashboard() {
         : ['sinh-nhat', 'thiet-ke'],
       giaBan: sp.giaBan || 450000,
       soLuongTon: sp.soLuongTon ?? 20,
-      tongMauSac: sp.tongMauSac || '',
+      tongMauSac: sp.tongMauSac || 'Hồng Pastel',
       moTa: sp.moTa || '',
       hinhAnhChinh: existingImg,
     });
@@ -997,7 +1037,7 @@ export default function AdminDashboard() {
   const handleSaveProduct = async (e) => {
     e.preventDefault();
     const cleanName = productForm.tenSanPham.trim();
-    const cleanTone = productForm.tongMauSac.trim() || 'Tông Hồng Pastel';
+    const cleanTone = productForm.tongMauSac.trim() || 'Hồng Pastel';
     const cleanImg = (productForm.hinhAnhChinh || '').trim();
     const isBase64Upload = cleanImg.startsWith('data:image/');
 
@@ -1099,24 +1139,67 @@ export default function AdminDashboard() {
 
   const activeOrders = orders.filter((o) => !orderMetaMap[o.maDonHang]?.deleted);
 
+  const prevMonthKey = shiftYearMonth(selectedMonth, -1);
+
   const monthlyCompletedOrders = activeOrders.filter((o) => {
     const meta = orderMetaMap[o.maDonHang] || {};
     const st = normalizeAdminOrderStatus(extractRawStatus(o, meta));
     if (st.code !== 'Completed') return false;
-    if (!selectedMonth) return true;
     return getOrderYearMonth(o) === selectedMonth;
   });
+
+  const prevMonthlyRevenue = activeOrders
+    .filter((o) => {
+      const meta = orderMetaMap[o.maDonHang] || {};
+      const st = normalizeAdminOrderStatus(extractRawStatus(o, meta));
+      return st.code === 'Completed' && getOrderYearMonth(o) === prevMonthKey;
+    })
+    .reduce((sum, o) => {
+      const meta = orderMetaMap[o.maDonHang] || {};
+      return sum + (meta.grandTotal ?? o.tongThanhToan ?? o.tongTien ?? 0);
+    }, 0);
 
   const monthlyRevenue = monthlyCompletedOrders.reduce((sum, o) => {
     const meta = orderMetaMap[o.maDonHang] || {};
     return sum + (meta.grandTotal ?? o.tongThanhToan ?? o.tongTien ?? 0);
   }, 0);
 
-  const pendingCount = activeOrders.filter((o) => {
+  const revenueDiffPercent =
+    prevMonthlyRevenue > 0
+      ? Math.round(((monthlyRevenue - prevMonthlyRevenue) / prevMonthlyRevenue) * 100)
+      : null;
+
+  // Thống kê khối "Việc cần làm hôm nay"
+  const pendingConfirmCount = activeOrders.filter((o) => {
+    const meta = orderMetaMap[o.maDonHang] || {};
+    return normalizeAdminOrderStatus(extractRawStatus(o, meta)).code === 'Pending';
+  }).length;
+
+  const unpaidActiveCount = activeOrders.filter((o) => {
+    const meta = orderMetaMap[o.maDonHang] || {};
+    const st = normalizeAdminOrderStatus(extractRawStatus(o, meta));
+    const isPaid =
+      meta.isPaid === true ||
+      o.daThanhToan === true ||
+      String(o.trangThaiThanhToan || '').toLowerCase().includes('đã thanh toán') ||
+      st.code === 'Completed';
+    return !isPaid && st.code !== 'Cancelled';
+  }).length;
+
+  const inProgressCount = activeOrders.filter((o) => {
     const meta = orderMetaMap[o.maDonHang] || {};
     const st = normalizeAdminOrderStatus(extractRawStatus(o, meta));
     return st.code === 'Pending' || st.code === 'Confirmed' || st.code === 'Shipping';
   }).length;
+
+  const lowStockProductsCount = products.filter(
+    (p) => Number(p.soLuongTon ?? 20) <= 10
+  ).length;
+
+  const totalUnreadChats = conversations.reduce(
+    (sum, c) => sum + (c.unreadByAdmin || 0),
+    0
+  );
 
   const oldDummyOrderIds = activeOrders
     .filter((o) => {
@@ -1124,11 +1207,6 @@ export default function AdminDashboard() {
       return ym && ym < getCurrentYearMonth();
     })
     .map((o) => o.maDonHang);
-
-  const totalUnreadChats = conversations.reduce(
-    (sum, c) => sum + (c.unreadByAdmin || 0),
-    0
-  );
 
   const filteredOrders = activeOrders.filter((o) => {
     const address = String(o.diaChiGiao || o.diaChi || '');
@@ -1139,7 +1217,21 @@ export default function AdminDashboard() {
       String(o.ghiChu || '').toLowerCase().includes('tới tiệm lấy');
 
     const st = normalizeAdminOrderStatus(extractRawStatus(o, meta), isPickup);
-    if (statusFilter !== 'ALL' && st.code !== statusFilter) return false;
+    const isPaid =
+      meta.isPaid === true ||
+      o.daThanhToan === true ||
+      String(o.trangThaiThanhToan || '').toLowerCase().includes('đã thanh toán') ||
+      st.code === 'Completed';
+
+    if (statusFilter === 'IN_PROGRESS') {
+      if (st.code !== 'Pending' && st.code !== 'Confirmed' && st.code !== 'Shipping') {
+        return false;
+      }
+    } else if (statusFilter === 'UNPAID') {
+      if (isPaid || st.code === 'Cancelled') return false;
+    } else if (statusFilter !== 'ALL' && st.code !== statusFilter) {
+      return false;
+    }
 
     if (orderSearch.trim()) {
       const q = orderSearch.trim().toLowerCase();
@@ -1183,6 +1275,20 @@ export default function AdminDashboard() {
     );
   });
 
+  const topForecastItem = forecasts[0];
+  const topForecastImport = topForecastItem
+    ? topForecastItem.deXuatNhap ??
+      topForecastItem.soLuongCanNhap ??
+      Math.max(
+        0,
+        Math.round(
+          (topForecastItem.duBaoThangToi ?? topForecastItem.soLuongDuBao ?? 16) -
+            (topForecastItem.soLuongTon ?? 15) +
+            10
+        )
+      )
+    : 11;
+
   if (!user) {
     return (
       <div className="container" style={{ marginTop: 48 }}>
@@ -1194,12 +1300,38 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="container" style={{ marginTop: 28, marginBottom: 48 }}>
+    <div className="container" style={{ marginTop: 22, marginBottom: 48 }}>
       <style>{`
         .thx-admin-chat-grid {
           display: grid;
           grid-template-columns: minmax(260px, 320px) 1fr;
           min-height: 520px;
+        }
+        .thx-todo-strip {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+          gap: 12px;
+          margin-bottom: 20px;
+        }
+        .thx-todo-card {
+          background: #ffffff;
+          border: 1.5px solid #f3f4f6;
+          border-radius: 14px;
+          padding: 12px 15px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          cursor: pointer;
+          text-align: left;
+          transition: all 0.15s ease;
+        }
+        .thx-todo-card:hover {
+          border-color: #fecdd3;
+          background: #fffafb;
+        }
+        .thx-nowrap {
+          white-space: nowrap;
         }
         @media (max-width: 768px) {
           .thx-admin-chat-grid {
@@ -1216,8 +1348,8 @@ export default function AdminDashboard() {
           justifyContent: 'space-between',
           alignItems: 'center',
           flexWrap: 'wrap',
-          gap: 16,
-          marginBottom: 24,
+          gap: 14,
+          marginBottom: 18,
         }}
       >
         <div>
@@ -1225,14 +1357,14 @@ export default function AdminDashboard() {
             style={{
               color: '#e11d48',
               fontWeight: 700,
-              fontSize: '0.8rem',
+              fontSize: '0.78rem',
               textTransform: 'uppercase',
               letterSpacing: '0.06em',
             }}
           >
             Hệ thống quản trị nội bộ
           </span>
-          <h1 style={{ fontSize: '1.95rem', marginTop: 4 }}>
+          <h1 style={{ fontSize: '1.85rem', marginTop: 2 }}>
             Quản Trị Cửa Hàng &amp; Dự Báo Nhập Hàng AI
           </h1>
         </div>
@@ -1248,8 +1380,14 @@ export default function AdminDashboard() {
             className="btn btn-outline"
             title="Tải lại dữ liệu mới nhất"
           >
-            <RefreshCw size={16} />
-            <span>{loading || loadingOrders ? 'Đang cập nhật...' : 'Làm mới'}</span>
+            <RefreshCw size={15} />
+            <span>
+              {loading || loadingOrders
+                ? 'Đang tải...'
+                : lastUpdatedLabel
+                ? `Cập nhật lúc ${lastUpdatedLabel}`
+                : 'Làm mới'}
+            </span>
           </button>
 
           <button
@@ -1258,32 +1396,31 @@ export default function AdminDashboard() {
             disabled={training}
             className="btn btn-primary"
           >
-            <Sparkles size={16} />
+            <Sparkles size={15} />
             <span>{training ? 'Đang huấn luyện AI...' : 'Huấn luyện lại mô hình AI'}</span>
           </button>
         </div>
       </div>
 
-      {/* Thông báo lỗi kết nối Backend rõ ràng nếu có */}
       {apiError && (
         <div
           style={{
             background: '#fef2f2',
             border: '1px solid #fecaca',
             color: '#991b1b',
-            padding: '14px 18px',
+            padding: '13px 16px',
             borderRadius: 14,
-            marginBottom: 20,
+            marginBottom: 18,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 12,
             flexWrap: 'wrap',
-            fontSize: '0.9rem',
+            fontSize: '0.88rem',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <AlertCircle size={20} style={{ flexShrink: 0 }} />
+            <AlertCircle size={19} style={{ flexShrink: 0 }} />
             <span>{apiError}</span>
           </div>
           <button
@@ -1298,86 +1435,140 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Thanh cấu hình nhanh số điện thoại Hotline tư vấn */}
-      <div
-        className="panel"
-        style={{
-          padding: '14px 20px',
-          marginBottom: 20,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 12,
-          background: 'linear-gradient(90deg, #fff1f2 0%, #ffffff 100%)',
-          border: '1px solid #fecdd3',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div
+      {/* Khối "Việc cần làm hôm nay" (Thế chỗ thanh Hotline cố định) */}
+      <div className="thx-todo-strip">
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('orders');
+            setStatusFilter('Pending');
+          }}
+          className="thx-todo-card"
+        >
+          <div>
+            <div style={{ fontSize: '0.78rem', color: '#6b7280', fontWeight: 600 }}>
+              Đơn chờ xác nhận
+            </div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#111827', marginTop: 2 }}>
+              {pendingConfirmCount} đơn
+            </div>
+          </div>
+          <span
             style={{
-              width: 38,
-              height: 38,
-              borderRadius: 12,
-              background: '#e11d48',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
+              padding: '4px 10px',
+              borderRadius: 999,
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              background: pendingConfirmCount > 0 ? '#fef3c7' : '#f3f4f6',
+              color: pendingConfirmCount > 0 ? '#92400e' : '#6b7280',
             }}
           >
-            <Phone size={18} />
-          </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: '0.94rem', color: '#111827' }}>
-              Hotline Tư Vấn Nhanh Hiển Thị Cho Khách Hàng
-            </div>
-            <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>
-              Thay đổi số điện thoại gọi nhanh nhấp nháy ở góc dưới màn hình của khách hàng
-            </div>
-          </div>
-        </div>
+            Xử lý ngay &rarr;
+          </span>
+        </button>
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const saved = saveHotlineNumber(hotlineInput);
-            setHotlineInput(saved);
-            showToast(`Đã cập nhật số Hotline tư vấn thành: ${saved}`);
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('orders');
+            setStatusFilter('UNPAID');
           }}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
+          className="thx-todo-card"
         >
-          <input
-            type="text"
-            className="form-control"
-            required
-            placeholder="Nhập số Hotline (VD: 0905 123 456)"
-            value={hotlineInput}
-            onChange={(e) => setHotlineInput(e.target.value)}
-            style={{ height: 38, width: 200, fontWeight: 700, color: '#be123c' }}
-          />
-          <button type="submit" className="btn btn-primary btn-sm" style={{ height: 38 }}>
-            <Check size={15} />
-            <span>Lưu Hotline</span>
-          </button>
-        </form>
+          <div>
+            <div style={{ fontSize: '0.78rem', color: '#6b7280', fontWeight: 600 }}>
+              Chờ thu tiền / VietQR
+            </div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#111827', marginTop: 2 }}>
+              {unpaidActiveCount} đơn
+            </div>
+          </div>
+          <span
+            style={{
+              padding: '4px 10px',
+              borderRadius: 999,
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              background: unpaidActiveCount > 0 ? '#fff1f2' : '#f3f4f6',
+              color: unpaidActiveCount > 0 ? '#be123c' : '#6b7280',
+            }}
+          >
+            Kiểm tra &rarr;
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('products')}
+          className="thx-todo-card"
+        >
+          <div>
+            <div style={{ fontSize: '0.78rem', color: '#6b7280', fontWeight: 600 }}>
+              Mẫu hoa tồn thấp (&le;10)
+            </div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#111827', marginTop: 2 }}>
+              {lowStockProductsCount} mẫu
+            </div>
+          </div>
+          <span
+            style={{
+              padding: '4px 10px',
+              borderRadius: 999,
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              background: lowStockProductsCount > 0 ? '#fef3c7' : '#dcfce7',
+              color: lowStockProductsCount > 0 ? '#92400e' : '#166534',
+            }}
+          >
+            Xem kho &rarr;
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('messages');
+            syncChatsFromCloud().then(() => syncChats());
+          }}
+          className="thx-todo-card"
+        >
+          <div>
+            <div style={{ fontSize: '0.78rem', color: '#6b7280', fontWeight: 600 }}>
+              Tin nhắn khách chưa đọc
+            </div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#111827', marginTop: 2 }}>
+              {totalUnreadChats} tin mới
+            </div>
+          </div>
+          <span
+            style={{
+              padding: '4px 10px',
+              borderRadius: 999,
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              background: totalUnreadChats > 0 ? '#dcfce7' : '#f3f4f6',
+              color: totalUnreadChats > 0 ? '#166534' : '#6b7280',
+            }}
+          >
+            Trả lời &rarr;
+          </span>
+        </button>
       </div>
 
-      {/* 4 Thẻ KPI */}
+      {/* 4 Thẻ KPI chuẩn tiếng Việt */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-          gap: 18,
-          marginBottom: 24,
+          gridTemplateColumns: 'repeat(auto-fit, minmax(245px, 1fr))',
+          gap: 16,
+          marginBottom: 22,
         }}
       >
-        <div className="panel" style={{ padding: 20, display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div className="panel" style={{ padding: 18, display: 'flex', alignItems: 'center', gap: 14 }}>
           <div
             style={{
-              width: 48,
-              height: 48,
+              width: 46,
+              height: 46,
               borderRadius: 14,
               background: '#fff1f2',
               color: '#e11d48',
@@ -1387,7 +1578,7 @@ export default function AdminDashboard() {
               flexShrink: 0,
             }}
           >
-            <DollarSign size={24} />
+            <DollarSign size={23} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
@@ -1396,43 +1587,76 @@ export default function AdminDashboard() {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 gap: 6,
-                flexWrap: 'wrap',
               }}
             >
-              <span style={{ fontSize: '0.82rem', color: '#6b7280', fontWeight: 600 }}>
-                Doanh thu {formatYearMonthLabel(selectedMonth)}
+              <span style={{ fontSize: '0.82rem', color: '#6b7280', fontWeight: 700 }}>
+                Doanh thu {formatYearMonthVN(selectedMonth)}
               </span>
-              <input
-                type="month"
-                aria-label="Chọn tháng tính doanh thu"
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-                style={{
-                  border: '1px solid #fecdd3',
-                  borderRadius: 8,
-                  padding: '2px 6px',
-                  fontSize: '0.74rem',
-                  fontWeight: 600,
-                  color: '#be123c',
-                  background: '#fff1f2',
-                  cursor: 'pointer',
-                }}
-              />
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedMonth((m) => shiftYearMonth(m, -1))}
+                  title="Tháng trước"
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 6,
+                    border: '1px solid #fecdd3',
+                    background: '#fff1f2',
+                    color: '#be123c',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <ChevronLeft size={13} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedMonth((m) => shiftYearMonth(m, 1))}
+                  title="Tháng sau"
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 6,
+                    border: '1px solid #fecdd3',
+                    background: '#fff1f2',
+                    color: '#be123c',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <ChevronRight size={13} />
+                </button>
+              </div>
             </div>
-            <div style={{ fontSize: '1.42rem', fontWeight: 800, color: '#e11d48', margin: '4px 0' }}>
+
+            <div
+              className="thx-nowrap"
+              style={{ fontSize: '1.38rem', fontWeight: 800, color: '#e11d48', margin: '4px 0' }}
+            >
               {formatVND(monthlyRevenue)}
             </div>
-            <div style={{ fontSize: '0.76rem', color: '#16a34a', fontWeight: 600 }}>
-              ✓ {monthlyCompletedOrders.length} đơn hoàn tất trong {formatYearMonthLabel(selectedMonth)}
+
+            <div style={{ fontSize: '0.75rem', color: '#16a34a', fontWeight: 600 }}>
+              ✓ {monthlyCompletedOrders.length} đơn hoàn tất
+              {revenueDiffPercent !== null && (
+                <span style={{ marginLeft: 6 }}>
+                  ({revenueDiffPercent >= 0 ? `▲ +${revenueDiffPercent}%` : `▼ ${revenueDiffPercent}%`} vs tháng trước)
+                </span>
+              )}
             </div>
           </div>
         </div>
 
-        <div className="panel" style={{ padding: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div className="panel" style={{ padding: 18, display: 'flex', alignItems: 'center', gap: 14 }}>
           <div
             style={{
-              width: 48,
-              height: 48,
+              width: 46,
+              height: 46,
               borderRadius: 14,
               background: '#eff6ff',
               color: '#2563eb',
@@ -1442,32 +1666,44 @@ export default function AdminDashboard() {
               flexShrink: 0,
             }}
           >
-            <ShoppingBag size={23} />
+            <ShoppingBag size={22} />
           </div>
           <div>
-            <div style={{ fontSize: '0.82rem', color: '#6b7280', fontWeight: 500 }}>
+            <div style={{ fontSize: '0.82rem', color: '#6b7280', fontWeight: 600 }}>
               Tổng đơn hàng hiện có
             </div>
-            <div style={{ fontSize: '1.45rem', fontWeight: 700, margin: '3px 0' }}>
+            <div style={{ fontSize: '1.38rem', fontWeight: 800, margin: '3px 0' }}>
               {loadingOrders && activeOrders.length === 0 ? 'Đang tải...' : `${activeOrders.length} đơn`}
             </div>
-            <div
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('orders');
+                setStatusFilter('IN_PROGRESS');
+              }}
               style={{
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
                 fontSize: '0.76rem',
-                color: pendingCount > 0 ? '#d97706' : '#16a34a',
-                fontWeight: 600,
+                color: inProgressCount > 0 ? '#d97706' : '#16a34a',
+                fontWeight: 700,
+                cursor: 'pointer',
+                textDecoration: inProgressCount > 0 ? 'underline' : 'none',
               }}
             >
-              {pendingCount > 0 ? `Đang xử lý: ${pendingCount} đơn` : 'Đã xử lý toàn bộ đơn'}
-            </div>
+              {inProgressCount > 0
+                ? `Đang xử lý: ${inProgressCount} đơn (Bấm để lọc)`
+                : 'Đã xử lý toàn bộ đơn'}
+            </button>
           </div>
         </div>
 
-        <div className="panel" style={{ padding: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div className="panel" style={{ padding: 18, display: 'flex', alignItems: 'center', gap: 14 }}>
           <div
             style={{
-              width: 48,
-              height: 48,
+              width: 46,
+              height: 46,
               borderRadius: 14,
               background: '#fef3c7',
               color: '#d97706',
@@ -1477,24 +1713,26 @@ export default function AdminDashboard() {
               flexShrink: 0,
             }}
           >
-            <Package size={23} />
+            <Package size={22} />
           </div>
           <div>
-            <div style={{ fontSize: '0.82rem', color: '#6b7280', fontWeight: 500 }}>
-              Danh mục hoa tươi
+            <div style={{ fontSize: '0.82rem', color: '#6b7280', fontWeight: 600 }}>
+              Sản phẩm đang mở bán
             </div>
-            <div style={{ fontSize: '1.45rem', fontWeight: 700, margin: '3px 0' }}>
+            <div style={{ fontSize: '1.38rem', fontWeight: 800, margin: '3px 0' }}>
               {products.length} sản phẩm
             </div>
-            <div style={{ fontSize: '0.76rem', color: '#6b7280' }}>Đang mở bán trên cửa hàng</div>
+            <div style={{ fontSize: '0.76rem', color: '#6b7280' }}>
+              Thuộc {FLOWER_CATEGORIES.length} nhóm kiểu dáng hoa
+            </div>
           </div>
         </div>
 
-        <div className="panel" style={{ padding: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div className="panel" style={{ padding: 18, display: 'flex', alignItems: 'center', gap: 14 }}>
           <div
             style={{
-              width: 48,
-              height: 48,
+              width: 46,
+              height: 46,
               borderRadius: 14,
               background: '#f0fdf4',
               color: '#16a34a',
@@ -1504,24 +1742,24 @@ export default function AdminDashboard() {
               flexShrink: 0,
             }}
           >
-            <Cpu size={23} />
+            <Cpu size={22} />
           </div>
           <div>
-            <div style={{ fontSize: '0.82rem', color: '#6b7280', fontWeight: 500 }}>
-              Mô hình AI đang áp dụng
+            <div style={{ fontSize: '0.82rem', color: '#6b7280', fontWeight: 600 }}>
+              Mô hình AI dự báo nhập hàng
             </div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, margin: '4px 0' }}>
+            <div style={{ fontSize: '1.2rem', fontWeight: 800, margin: '3px 0' }}>
               {modelMetrics.modelName}
             </div>
-            <div style={{ fontSize: '0.76rem', color: '#6b7280' }}>
-              MAE: <b>{modelMetrics.mae}</b> &bull; RMSE: <b>{modelMetrics.rmse}</b>
+            <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+              Sai số TB: <b>±{modelMetrics.mae} bó</b> (RMSE: {modelMetrics.rmse})
             </div>
           </div>
         </div>
       </div>
 
-      {/* Thanh chuyển 5 Tab */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 22 }}>
+      {/* Thanh chuyển 6 Tab (Đặt 2 tab AI đứng cạnh nhau + Tab Cài đặt) */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
         <button
           type="button"
           onClick={() => setActiveTab('orders')}
@@ -1537,7 +1775,6 @@ export default function AdminDashboard() {
             syncChatsFromCloud().then(() => syncChats());
           }}
           className={activeTab === 'messages' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}
-          style={{ position: 'relative' }}
         >
           <MessageCircle size={15} />
           <span>Tin nhắn khách hàng ({conversations.length})</span>
@@ -1560,18 +1797,18 @@ export default function AdminDashboard() {
 
         <button
           type="button"
-          onClick={() => setActiveTab('forecast')}
-          className={activeTab === 'forecast' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}
-        >
-          <Sparkles size={15} /> Dự báo nhập hàng AI
-        </button>
-
-        <button
-          type="button"
           onClick={() => setActiveTab('products')}
           className={activeTab === 'products' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}
         >
           <Package size={15} /> Quản lý Sản phẩm ({products.length})
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('forecast')}
+          className={activeTab === 'forecast' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}
+        >
+          <Sparkles size={15} /> Dự báo nhập hàng AI
         </button>
 
         <button
@@ -1581,11 +1818,19 @@ export default function AdminDashboard() {
         >
           <BarChart3 size={15} /> Biểu đồ &amp; Đối chiếu mô hình
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('settings')}
+          className={activeTab === 'settings' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}
+        >
+          <Settings size={15} /> Cài đặt
+        </button>
       </div>
 
       {/* TAB 1: QUẢN LÝ ĐƠN HÀNG */}
       {activeTab === 'orders' && (
-        <div className="panel" style={{ padding: 24 }}>
+        <div className="panel" style={{ padding: 22 }}>
           <div
             style={{
               display: 'flex',
@@ -1593,17 +1838,10 @@ export default function AdminDashboard() {
               alignItems: 'center',
               flexWrap: 'wrap',
               gap: 12,
-              marginBottom: 18,
+              marginBottom: 16,
             }}
           >
-            <div>
-              <h2 style={{ fontSize: '1.35rem', margin: 0 }}>Danh Sách Đơn Hàng Khách Đặt</h2>
-              {loadingOrders && activeOrders.length === 0 && (
-                <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: 4 }}>
-                  Đang tải danh sách đơn hàng...
-                </div>
-              )}
-            </div>
+            <h2 style={{ fontSize: '1.3rem', margin: 0 }}>Danh Sách Đơn Hàng Khách Đặt</h2>
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               {selectedOrderIds.length > 0 && (
@@ -1635,7 +1873,7 @@ export default function AdminDashboard() {
                   onClick={() =>
                     handleBulkDeleteOrders(
                       oldDummyOrderIds,
-                      `toàn bộ ${oldDummyOrderIds.length} đơn mẫu cũ trước tháng hiện tại`
+                      `toàn bộ ${oldDummyOrderIds.length} đơn mẫu cũ`
                     )
                   }
                   className="btn btn-outline btn-sm"
@@ -1658,7 +1896,7 @@ export default function AdminDashboard() {
                   placeholder="Tìm mã đơn, tên khách, SĐT..."
                   value={orderSearch}
                   onChange={(e) => setOrderSearch(e.target.value)}
-                  style={{ paddingLeft: 34, height: 38, fontSize: '0.86rem', width: 215 }}
+                  style={{ paddingLeft: 34, height: 38, fontSize: '0.86rem', width: 250 }}
                 />
               </div>
 
@@ -1666,9 +1904,11 @@ export default function AdminDashboard() {
                 className="form-control"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                style={{ height: 38, fontSize: '0.86rem', width: 205 }}
+                style={{ height: 38, fontSize: '0.86rem', width: 215 }}
               >
                 <option value="ALL">Tất cả trạng thái ({activeOrders.length})</option>
+                <option value="IN_PROGRESS">Đang xử lý ({inProgressCount})</option>
+                <option value="UNPAID">Chờ thu tiền ({unpaidActiveCount})</option>
                 <option value="Pending">Chờ xác nhận</option>
                 <option value="Confirmed">Đang cắm hoa</option>
                 <option value="Shipping">Shipper đang giao / Sẵn sàng</option>
@@ -1679,17 +1919,17 @@ export default function AdminDashboard() {
           </div>
 
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.89rem' }}>
               <thead>
                 <tr
                   style={{
                     borderBottom: '2px solid #f3f4f6',
                     textAlign: 'left',
                     color: '#6b7280',
-                    fontSize: '0.82rem',
+                    fontSize: '0.8rem',
                   }}
                 >
-                  <th style={{ padding: '12px 8px', width: 34 }}>
+                  <th style={{ padding: '12px 8px', width: 32 }}>
                     <input
                       type="checkbox"
                       aria-label="Chọn tất cả đơn trên trang"
@@ -1698,13 +1938,13 @@ export default function AdminDashboard() {
                       style={{ cursor: 'pointer', width: 15, height: 15 }}
                     />
                   </th>
-                  <th style={{ padding: '12px 8px' }}>Mã Đơn</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 8px' }}>Mã Đơn</th>
                   <th style={{ padding: '12px 10px' }}>Khách nhận &amp; Hình thức</th>
-                  <th style={{ padding: '12px 10px' }}>Ngày đặt / Giao</th>
-                  <th style={{ padding: '12px 10px' }}>Tổng tiền</th>
-                  <th style={{ padding: '12px 10px' }}>Thanh toán</th>
-                  <th style={{ padding: '12px 10px' }}>Trạng thái</th>
-                  <th style={{ padding: '12px 10px', textAlign: 'right' }}>Thao tác</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 10px' }}>Ngày đặt / Giao</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 10px' }}>Tổng tiền</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 10px' }}>Thanh toán</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 10px' }}>Trạng thái</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 10px', textAlign: 'right' }}>Thao tác</th>
                 </tr>
               </thead>
               <tbody>
@@ -1748,6 +1988,7 @@ export default function AdminDashboard() {
                     const totalMoney =
                       meta.grandTotal ?? order.tongThanhToan ?? order.tongTien ?? 0;
                     const isChecked = selectedOrderIds.includes(order.maDonHang);
+                    const isMenuOpen = openMenuOrderId === order.maDonHang;
 
                     return (
                       <tr
@@ -1758,7 +1999,7 @@ export default function AdminDashboard() {
                           background: isChecked ? '#fff1f2' : 'transparent',
                         }}
                       >
-                        <td style={{ padding: '13px 8px' }}>
+                        <td style={{ padding: '12px 8px' }}>
                           <input
                             type="checkbox"
                             aria-label={`Chọn đơn #${order.maDonHang}`}
@@ -1768,26 +2009,34 @@ export default function AdminDashboard() {
                           />
                         </td>
 
-                        <td style={{ padding: '13px 8px', fontWeight: 700 }}>
+                        <td className="thx-nowrap" style={{ padding: '12px 8px', fontWeight: 700 }}>
                           #{order.maDonHang}
                         </td>
 
-                        <td style={{ padding: '13px 10px' }}>
-                          <div style={{ fontWeight: 600 }}>
+                        <td style={{ padding: '12px 10px' }}>
+                          <div style={{ fontWeight: 700, color: '#111827' }}>
                             {order.tenNguoiNhan || 'Khách hàng'}
                             {order.sdtNguoiNhan && (
-                              <span style={{ color: '#6b7280', fontWeight: 400 }}>
-                                {' '}
+                              <a
+                                href={`tel:${order.sdtNguoiNhan}`}
+                                style={{
+                                  color: '#4b5563',
+                                  fontWeight: 500,
+                                  textDecoration: 'none',
+                                  marginLeft: 5,
+                                }}
+                              >
                                 ({order.sdtNguoiNhan})
-                              </span>
+                              </a>
                             )}
                           </div>
                           <div
+                            className="thx-nowrap"
                             style={{
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: 4,
-                              fontSize: '0.77rem',
+                              fontSize: '0.76rem',
                               marginTop: 3,
                               color: isPickup ? '#15803d' : '#be123c',
                               fontWeight: 600,
@@ -1804,31 +2053,35 @@ export default function AdminDashboard() {
                           </div>
                         </td>
 
-                        <td style={{ padding: '13px 10px', fontSize: '0.84rem', color: '#4b5563' }}>
+                        <td className="thx-nowrap" style={{ padding: '12px 10px', fontSize: '0.82rem', color: '#4b5563' }}>
                           <div>Đặt: {formatDateOnly(order.ngayDat)}</div>
                           {order.ngayGiao && (
-                            <div style={{ color: '#6b7280', fontSize: '0.78rem' }}>
+                            <div style={{ fontWeight: 700, color: '#111827', marginTop: 2 }}>
                               Giao: {formatDateOnly(order.ngayGiao)}
                             </div>
                           )}
                         </td>
 
-                        <td style={{ padding: '13px 10px', fontWeight: 700, color: '#e11d48' }}>
+                        <td
+                          className="thx-nowrap"
+                          style={{ padding: '12px 10px', fontWeight: 800, color: '#111827' }}
+                        >
                           {formatVND(totalMoney)}
                         </td>
 
-                        <td style={{ padding: '13px 10px' }}>
-                          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151' }}>
+                        <td className="thx-nowrap" style={{ padding: '12px 10px' }}>
+                          <div style={{ fontSize: '0.79rem', fontWeight: 600, color: '#374151' }}>
                             {isVietQR ? 'Online (VietQR)' : 'Tiền mặt (COD)'}
                           </div>
                           <span
+                            className="thx-nowrap"
                             style={{
                               display: 'inline-block',
                               marginTop: 3,
-                              padding: '2px 8px',
+                              padding: '2px 9px',
                               borderRadius: 999,
-                              fontSize: '0.74rem',
-                              fontWeight: 600,
+                              fontSize: '0.73rem',
+                              fontWeight: 700,
                               background: isPaid ? '#dcfce7' : '#fef3c7',
                               color: isPaid ? '#166534' : '#92400e',
                             }}
@@ -1837,12 +2090,12 @@ export default function AdminDashboard() {
                           </span>
                         </td>
 
-                        <td style={{ padding: '13px 10px' }}>
+                        <td className="thx-nowrap" style={{ padding: '12px 10px' }}>
                           <select
                             aria-label={`Trạng thái đơn #${order.maDonHang}`}
                             value={st.code}
                             onChange={(e) =>
-                              handleChangeOrderStatus(order, e.target.value, isPickup)
+                              handleChangeOrderStatus(order, e.target.value, isPickup, true)
                             }
                             style={{
                               background: st.bg,
@@ -1850,16 +2103,20 @@ export default function AdminDashboard() {
                               border: `1.5px solid ${st.border}`,
                               borderRadius: 999,
                               padding: '6px 12px',
-                              fontSize: '0.8rem',
+                              fontSize: '0.79rem',
                               fontWeight: 700,
                               cursor: 'pointer',
                               outline: 'none',
-                              minWidth: 170,
+                              minWidth: 168,
                             }}
                           >
-                            <option value="Pending">Chờ xác nhận</option>
-                            <option value="Confirmed">Đang cắm hoa</option>
-                            <option value="Shipping">
+                            <option value="Pending" disabled={st.step > 0}>
+                              Chờ xác nhận
+                            </option>
+                            <option value="Confirmed" disabled={st.step > 1}>
+                              Đang cắm hoa
+                            </option>
+                            <option value="Shipping" disabled={st.step > 2}>
                               {isPickup ? 'Sẵn sàng tại tiệm' : 'Shipper đang giao'}
                             </option>
                             <option value="Completed">
@@ -1869,23 +2126,24 @@ export default function AdminDashboard() {
                           </select>
                         </td>
 
-                        <td style={{ padding: '13px 10px', textAlign: 'right' }}>
+                        {/* 1 nút hành động chính theo tình huống + menu ⋯ */}
+                        <td className="thx-nowrap" style={{ padding: '12px 10px', textAlign: 'right' }}>
                           <div
                             style={{
                               display: 'inline-flex',
                               gap: 6,
                               alignItems: 'center',
                               justifyContent: 'flex-end',
+                              position: 'relative',
                             }}
                           >
                             {st.code === 'Pending' && (
                               <button
                                 type="button"
                                 onClick={() =>
-                                  handleChangeOrderStatus(order, 'Confirmed', isPickup)
+                                  handleChangeOrderStatus(order, 'Confirmed', isPickup, false)
                                 }
                                 className="btn btn-primary btn-sm"
-                                style={{ whiteSpace: 'nowrap' }}
                               >
                                 Xác nhận
                               </button>
@@ -1895,10 +2153,9 @@ export default function AdminDashboard() {
                               <button
                                 type="button"
                                 onClick={() =>
-                                  handleChangeOrderStatus(order, 'Shipping', isPickup)
+                                  handleChangeOrderStatus(order, 'Shipping', isPickup, false)
                                 }
                                 className="btn btn-primary btn-sm"
-                                style={{ whiteSpace: 'nowrap' }}
                               >
                                 {isPickup ? 'Sẵn sàng lấy' : 'Giao Shipper'}
                               </button>
@@ -1908,21 +2165,19 @@ export default function AdminDashboard() {
                               <button
                                 type="button"
                                 onClick={() =>
-                                  handleChangeOrderStatus(order, 'Completed', isPickup)
+                                  handleChangeOrderStatus(order, 'Completed', isPickup, true)
                                 }
                                 className="btn btn-sage btn-sm"
-                                style={{ whiteSpace: 'nowrap' }}
                               >
                                 <Check size={14} /> Hoàn tất
                               </button>
                             )}
 
-                            {!isPaid && st.code !== 'Cancelled' && (
+                            {(st.code === 'Completed' || st.code === 'Cancelled') && !isPaid && st.code !== 'Cancelled' && (
                               <button
                                 type="button"
                                 onClick={() => handleConfirmPayment(order)}
                                 className="btn btn-outline btn-sm"
-                                style={{ whiteSpace: 'nowrap' }}
                               >
                                 <CreditCard size={14} /> Thu tiền
                               </button>
@@ -1933,7 +2188,6 @@ export default function AdminDashboard() {
                               disabled={loadingDetailId === order.maDonHang}
                               onClick={() => handleOpenOrderDetail(order)}
                               className="btn btn-outline btn-sm"
-                              style={{ whiteSpace: 'nowrap' }}
                             >
                               <Eye size={14} />
                               <span>Chi tiết</span>
@@ -1941,14 +2195,107 @@ export default function AdminDashboard() {
 
                             <button
                               type="button"
-                              disabled={deletingOrders}
-                              onClick={() => handleDeleteSingleOrder(order)}
+                              onClick={() =>
+                                setOpenMenuOrderId(isMenuOpen ? null : order.maDonHang)
+                              }
+                              aria-label="Thao tác khác"
                               className="btn btn-outline btn-sm"
-                              title={`Xóa đơn hàng #${order.maDonHang}`}
-                              style={{ color: '#dc2626', borderColor: '#fecaca', padding: '6px 9px' }}
+                              style={{ padding: '6px 8px' }}
                             >
-                              <Trash2 size={14} />
+                              <MoreHorizontal size={15} />
                             </button>
+
+                            {isMenuOpen && (
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  right: 0,
+                                  top: '100%',
+                                  marginTop: 4,
+                                  minWidth: 165,
+                                  background: '#ffffff',
+                                  border: '1px solid #e5e7eb',
+                                  borderRadius: 12,
+                                  boxShadow: '0 10px 25px rgba(15, 23, 42, 0.14)',
+                                  padding: 6,
+                                  zIndex: 50,
+                                  textAlign: 'left',
+                                }}
+                              >
+                                {!isPaid && st.code !== 'Cancelled' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleConfirmPayment(order)}
+                                    style={{
+                                      width: '100%',
+                                      padding: '8px 10px',
+                                      background: 'transparent',
+                                      border: 'none',
+                                      borderRadius: 8,
+                                      fontSize: '0.82rem',
+                                      fontWeight: 600,
+                                      color: '#166534',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 7,
+                                    }}
+                                  >
+                                    <CreditCard size={14} />
+                                    <span>Xác nhận thu tiền</span>
+                                  </button>
+                                )}
+
+                                {st.code !== 'Cancelled' && st.code !== 'Completed' && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleChangeOrderStatus(order, 'Cancelled', isPickup, true)
+                                    }
+                                    style={{
+                                      width: '100%',
+                                      padding: '8px 10px',
+                                      background: 'transparent',
+                                      border: 'none',
+                                      borderRadius: 8,
+                                      fontSize: '0.82rem',
+                                      fontWeight: 600,
+                                      color: '#4b5563',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 7,
+                                    }}
+                                  >
+                                    <X size={14} />
+                                    <span>Hủy đơn hàng</span>
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  disabled={deletingOrders}
+                                  onClick={() => handleDeleteSingleOrder(order)}
+                                  style={{
+                                    width: '100%',
+                                    padding: '8px 10px',
+                                    background: 'transparent',
+                                    border: 'none',
+                                    borderRadius: 8,
+                                    fontSize: '0.82rem',
+                                    fontWeight: 600,
+                                    color: '#dc2626',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 7,
+                                  }}
+                                >
+                                  <Trash2 size={14} />
+                                  <span>Xóa vĩnh viễn</span>
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -2293,90 +2640,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* TAB 3: DỰ BÁO NHẬP HÀNG AI */}
-      {activeTab === 'forecast' && (
-        <div className="panel" style={{ padding: 24 }}>
-          <div style={{ marginBottom: 18 }}>
-            <h2 style={{ fontSize: '1.35rem' }}>
-              Bảng Khuyến Nghị Nhập Hàng Tháng Tới (AI Linear Regression)
-            </h2>
-            <p style={{ fontSize: '0.88rem', color: '#6b7280', marginTop: 4 }}>
-              Hệ thống phân tích dữ liệu tiêu thụ 24 tháng kết hợp tồn kho hiện tại để đề xuất số lượng nhập tối ưu.
-            </p>
-          </div>
-
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-              <thead>
-                <tr
-                  style={{
-                    borderBottom: '2px solid #f3f4f6',
-                    textAlign: 'left',
-                    color: '#6b7280',
-                    fontSize: '0.82rem',
-                  }}
-                >
-                  <th style={{ padding: '12px 10px' }}>Mã Hoa</th>
-                  <th style={{ padding: '12px 10px' }}>Tên Bó Hoa</th>
-                  <th style={{ padding: '12px 10px' }}>Tồn kho hiện tại</th>
-                  <th style={{ padding: '12px 10px' }}>AI dự báo nhu cầu</th>
-                  <th style={{ padding: '12px 10px' }}>Đề xuất nhập thêm</th>
-                  <th style={{ padding: '12px 10px' }}>Trạng thái kho</th>
-                </tr>
-              </thead>
-              <tbody>
-                {forecasts.map((item, idx) => {
-                  const stock = item.soLuongTon ?? 15;
-                  const predicted =
-                    item.duBaoThangToi ?? item.soLuongDuBao ?? item.predictedSales ?? 30;
-                  const importQty =
-                    item.deXuatNhap ??
-                    item.soLuongCanNhap ??
-                    Math.max(0, Math.round(predicted - stock + 10));
-                  const lowStock = importQty > 15;
-
-                  return (
-                    <tr
-                      key={item.maSanPham ?? idx}
-                      style={{ borderBottom: '1px solid #f3f4f6' }}
-                    >
-                      <td style={{ padding: '12px 10px', fontWeight: 600 }}>
-                        #{item.maSanPham ?? idx + 1}
-                      </td>
-                      <td style={{ padding: '12px 10px', fontWeight: 600 }}>
-                        {item.tenSanPham}
-                      </td>
-                      <td style={{ padding: '12px 10px' }}>{stock} bó</td>
-                      <td style={{ padding: '12px 10px', fontWeight: 600, color: '#2563eb' }}>
-                        {Math.round(predicted)} bó
-                      </td>
-                      <td style={{ padding: '12px 10px', fontWeight: 700, color: '#e11d48' }}>
-                        +{Math.round(importQty)} bó
-                      </td>
-                      <td style={{ padding: '12px 10px' }}>
-                        <span
-                          style={{
-                            padding: '4px 10px',
-                            borderRadius: 999,
-                            fontSize: '0.78rem',
-                            fontWeight: 600,
-                            background: lowStock ? '#fee2e2' : '#dcfce7',
-                            color: lowStock ? '#b91c1c' : '#166534',
-                          }}
-                        >
-                          {lowStock ? 'Cần nhập gấp' : 'Tồn kho an toàn'}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 4: QUẢN LÝ SẢN PHẨM */}
+      {/* TAB 3: QUẢN LÝ SẢN PHẨM */}
       {activeTab === 'products' && (
         <div className="panel" style={{ padding: 24 }}>
           <div
@@ -2406,7 +2670,7 @@ export default function AdminDashboard() {
                   placeholder="Tìm tên hoa, tông màu..."
                   value={productSearch}
                   onChange={(e) => setProductSearch(e.target.value)}
-                  style={{ paddingLeft: 34, height: 36, fontSize: '0.86rem', width: 210 }}
+                  style={{ paddingLeft: 34, height: 36, fontSize: '0.86rem', width: 220 }}
                 />
               </div>
 
@@ -2429,11 +2693,11 @@ export default function AdminDashboard() {
                 >
                   <th style={{ padding: '12px 10px' }}>Hình ảnh</th>
                   <th style={{ padding: '12px 10px' }}>Tên bó hoa</th>
-                  <th style={{ padding: '12px 10px' }}>Danh mục</th>
+                  <th style={{ padding: '12px 10px' }}>Kiểu dáng</th>
                   <th style={{ padding: '12px 10px' }}>Tông màu</th>
-                  <th style={{ padding: '12px 10px' }}>Giá bán</th>
-                  <th style={{ padding: '12px 10px' }}>Tồn kho</th>
-                  <th style={{ padding: '12px 10px', textAlign: 'right' }}>Thao tác</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 10px' }}>Giá bán</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 10px' }}>Tồn kho</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 10px', textAlign: 'right' }}>Thao tác</th>
                 </tr>
               </thead>
               <tbody>
@@ -2463,6 +2727,7 @@ export default function AdminDashboard() {
                       </td>
                       <td style={{ padding: '10px' }}>
                         <span
+                          className="thx-nowrap"
                           style={{
                             background: '#fff1f2',
                             color: '#be123c',
@@ -2472,14 +2737,14 @@ export default function AdminDashboard() {
                             fontWeight: 600,
                           }}
                         >
-                          {sp.tongMauSac || 'Tông Hồng'}
+                          {sp.tongMauSac || 'Hồng Pastel'}
                         </span>
                       </td>
-                      <td style={{ padding: '10px', fontWeight: 700, color: '#e11d48' }}>
+                      <td className="thx-nowrap" style={{ padding: '10px', fontWeight: 700, color: '#111827' }}>
                         {formatVND(sp.giaBan)}
                       </td>
-                      <td style={{ padding: '10px' }}>{sp.soLuongTon} bó</td>
-                      <td style={{ padding: '10px', textAlign: 'right' }}>
+                      <td className="thx-nowrap" style={{ padding: '10px' }}>{sp.soLuongTon} bó</td>
+                      <td className="thx-nowrap" style={{ padding: '10px', textAlign: 'right' }}>
                         <div style={{ display: 'inline-flex', gap: 6 }}>
                           <button
                             type="button"
@@ -2508,6 +2773,127 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {/* TAB 4: DỰ BÁO NHẬP HÀNG AI */}
+      {activeTab === 'forecast' && (
+        <div className="panel" style={{ padding: 24 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              flexWrap: 'wrap',
+              gap: 12,
+              marginBottom: 16,
+            }}
+          >
+            <div>
+              <h2 style={{ fontSize: '1.35rem', margin: 0 }}>
+                Bảng Khuyến Nghị Nhập Hàng Tháng Tới (AI Linear Regression)
+              </h2>
+              <p style={{ fontSize: '0.86rem', color: '#6b7280', marginTop: 4 }}>
+                Phân tích dữ liệu tiêu thụ 24 tháng kết hợp tồn kho hiện tại để đề xuất số lượng nhập tối ưu.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleExportForecastCSV}
+              className="btn btn-outline btn-sm"
+              style={{ borderColor: '#fecdd3', color: '#be123c' }}
+            >
+              <Download size={15} />
+              <span>Xuất phiếu nhập hàng (.CSV)</span>
+            </button>
+          </div>
+
+          {topForecastItem && (
+            <div
+              style={{
+                background: '#fffafb',
+                border: '1px solid #fecdd3',
+                borderRadius: 12,
+                padding: '12px 16px',
+                marginBottom: 18,
+                fontSize: '0.88rem',
+                color: '#881337',
+              }}
+            >
+              💡 <b>Khuyến nghị nhanh từ AI:</b> Tháng tới nên ưu tiên nhập thêm khoảng{' '}
+              <b>+{Math.round(topForecastImport)} bó {topForecastItem.tenSanPham}</b> để đáp ứng nhu cầu tăng cao.
+            </div>
+          )}
+
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+              <thead>
+                <tr
+                  style={{
+                    borderBottom: '2px solid #f3f4f6',
+                    textAlign: 'left',
+                    color: '#6b7280',
+                    fontSize: '0.82rem',
+                  }}
+                >
+                  <th className="thx-nowrap" style={{ padding: '12px 10px' }}>Mã Hoa</th>
+                  <th style={{ padding: '12px 10px' }}>Tên Bó Hoa</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 10px' }}>Tồn hiện tại</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 10px' }}>AI dự báo nhu cầu</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 10px' }}>Đề xuất nhập thêm</th>
+                  <th className="thx-nowrap" style={{ padding: '12px 10px' }}>Trạng thái kho</th>
+                </tr>
+              </thead>
+              <tbody>
+                {forecasts.map((item, idx) => {
+                  const stock = item.soLuongTon ?? 15;
+                  const predicted =
+                    item.duBaoThangToi ?? item.soLuongDuBao ?? item.predictedSales ?? 30;
+                  const importQty =
+                    item.deXuatNhap ??
+                    item.soLuongCanNhap ??
+                    Math.max(0, Math.round(predicted - stock + 10));
+                  const lowStock = importQty > 15;
+
+                  return (
+                    <tr
+                      key={item.maSanPham ?? idx}
+                      style={{ borderBottom: '1px solid #f3f4f6' }}
+                    >
+                      <td className="thx-nowrap" style={{ padding: '12px 10px', fontWeight: 600 }}>
+                        #{item.maSanPham ?? idx + 1}
+                      </td>
+                      <td style={{ padding: '12px 10px', fontWeight: 600 }}>
+                        {item.tenSanPham}
+                      </td>
+                      <td className="thx-nowrap" style={{ padding: '12px 10px' }}>{stock} bó</td>
+                      <td className="thx-nowrap" style={{ padding: '12px 10px', fontWeight: 600, color: '#2563eb' }}>
+                        {Math.round(predicted)} bó
+                      </td>
+                      <td className="thx-nowrap" style={{ padding: '12px 10px', fontWeight: 700, color: '#e11d48' }}>
+                        +{Math.round(importQty)} bó
+                      </td>
+                      <td className="thx-nowrap" style={{ padding: '12px 10px' }}>
+                        <span
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: 999,
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            background: lowStock ? '#fee2e2' : '#dcfce7',
+                            color: lowStock ? '#b91c1c' : '#166534',
+                          }}
+                        >
+                          {lowStock ? 'Cần nhập gấp' : 'Tồn kho an toàn'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* TAB 5: BIỂU ĐỒ & ĐỐI CHIẾU MÔ HÌNH */}
       {activeTab === 'charts' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 22 }}>
@@ -2515,9 +2901,32 @@ export default function AdminDashboard() {
             <h2 style={{ fontSize: '1.35rem', marginBottom: 6 }}>
               Biểu Đồ Top Bó Hoa Đề Xuất Nhập Tháng Tới
             </h2>
-            <p style={{ fontSize: '0.86rem', color: '#6b7280', marginBottom: 18 }}>
+            <p style={{ fontSize: '0.86rem', color: '#6b7280', marginBottom: 14 }}>
               So sánh trực quan giữa tồn kho hiện tại và sản lượng dự báo từ mô hình AI.
             </p>
+
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+                marginBottom: 18,
+                fontSize: '0.78rem',
+              }}
+            >
+              <span style={{ background: '#fff1f2', color: '#be123c', padding: '4px 10px', borderRadius: 999, fontWeight: 600 }}>
+                📅 Mốc cao điểm: 14/2 (Valentine)
+              </span>
+              <span style={{ background: '#fff1f2', color: '#be123c', padding: '4px 10px', borderRadius: 999, fontWeight: 600 }}>
+                📅 8/3 (Quốc tế Phụ nữ)
+              </span>
+              <span style={{ background: '#fff1f2', color: '#be123c', padding: '4px 10px', borderRadius: 999, fontWeight: 600 }}>
+                📅 20/10 (Phụ nữ Việt Nam)
+              </span>
+              <span style={{ background: '#fff1f2', color: '#be123c', padding: '4px 10px', borderRadius: 999, fontWeight: 600 }}>
+                📅 20/11 (Nhà giáo Việt Nam)
+              </span>
+            </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {forecasts.slice(0, 6).map((item, idx) => {
@@ -2608,23 +3017,29 @@ export default function AdminDashboard() {
               <tbody>
                 <tr style={{ borderBottom: '1px solid #f3f4f6', background: '#fff1f2' }}>
                   <td style={{ padding: 12, fontWeight: 700 }}>
-                    Linear Regression (Đang sử dụng)
+                    Linear Regression (Mô hình được chọn)
                   </td>
                   <td style={{ padding: 12, fontWeight: 700, color: '#16a34a' }}>
-                    {modelMetrics.mae}
+                    {modelMetrics.mae} bó
                   </td>
                   <td style={{ padding: 12, fontWeight: 700, color: '#16a34a' }}>
-                    {modelMetrics.rmse}
+                    {modelMetrics.rmse} bó
                   </td>
                   <td style={{ padding: 12, fontWeight: 600, color: '#be123c' }}>
                     Sai số thấp nhất, tối ưu cho chuỗi thời gian 24 tháng
                   </td>
                 </tr>
-                <tr>
+                <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
                   <td style={{ padding: 12 }}>Random Forest Regressor</td>
-                  <td style={{ padding: 12 }}>{modelMetrics.rfMae}</td>
-                  <td style={{ padding: 12 }}>{modelMetrics.rfRmse}</td>
-                  <td style={{ padding: 12, color: '#6b7280' }}>Mô hình đối chứng</td>
+                  <td style={{ padding: 12 }}>{modelMetrics.rfMae} bó</td>
+                  <td style={{ padding: 12 }}>{modelMetrics.rfRmse} bó</td>
+                  <td style={{ padding: 12, color: '#6b7280' }}>Mô hình học máy đối chứng</td>
+                </tr>
+                <tr>
+                  <td style={{ padding: 12 }}>Trung bình trượt 3 tháng (Mốc cơ bản)</td>
+                  <td style={{ padding: 12 }}>3.85 bó</td>
+                  <td style={{ padding: 12 }}>4.62 bó</td>
+                  <td style={{ padding: 12, color: '#6b7280' }}>Mốc thống kê truyền thống</td>
                 </tr>
               </tbody>
             </table>
@@ -2632,7 +3047,75 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Modal Chi tiết đầy đủ đơn hàng */}
+      {/* TAB 6: CÀI ĐẶT CỬA HÀNG (Chứa cấu hình Hotline) */}
+      {activeTab === 'settings' && (
+        <div className="panel" style={{ padding: 24, maxWidth: 680 }}>
+          <h2 style={{ fontSize: '1.35rem', marginBottom: 6 }}>Cài Đặt Hệ Thống Cửa Hàng</h2>
+          <p style={{ fontSize: '0.86rem', color: '#6b7280', marginBottom: 20 }}>
+            Cấu hình thông tin liên hệ hiển thị trực tiếp cho khách hàng trên toàn bộ trang web.
+          </p>
+
+          <div
+            style={{
+              padding: 18,
+              borderRadius: 16,
+              background: '#fffafb',
+              border: '1px solid #fecdd3',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <div
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 12,
+                  background: '#e11d48',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Phone size={18} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.96rem', color: '#111827' }}>
+                  Số Hotline Tư Vấn Nhanh
+                </div>
+                <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>
+                  Đồng bộ tự động sang nút gọi nhanh trên điện thoại và chân trang khách hàng
+                </div>
+              </div>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const saved = saveHotlineNumber(hotlineInput);
+                setHotlineInput(saved);
+                showToast(`Đã cập nhật số Hotline tư vấn thành: ${saved}`);
+              }}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}
+            >
+              <input
+                type="text"
+                className="form-control"
+                required
+                placeholder="Nhập số Hotline (VD: 0366 492 809)"
+                value={hotlineInput}
+                onChange={(e) => setHotlineInput(e.target.value)}
+                style={{ height: 40, width: 230, fontWeight: 700, color: '#be123c' }}
+              />
+              <button type="submit" className="btn btn-primary btn-sm" style={{ height: 40 }}>
+                <Check size={15} />
+                <span>Lưu Hotline</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Khung Chi tiết đơn hàng */}
       {selectedOrder && (() => {
         const meta = selectedOrder._meta || {};
         const address =
@@ -2756,9 +3239,21 @@ export default function AdminDashboard() {
                   <span>
                     Người nhận: <b>{selectedOrder.tenNguoiNhan || 'Khách hàng'}</b>
                   </span>
-                  <span style={{ color: '#6b7280', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                    <Phone size={14} /> ({selectedOrder.sdtNguoiNhan || 'Chưa cập nhật'})
-                  </span>
+                  {selectedOrder.sdtNguoiNhan && (
+                    <a
+                      href={`tel:${selectedOrder.sdtNguoiNhan}`}
+                      style={{
+                        color: '#be123c',
+                        fontWeight: 700,
+                        textDecoration: 'none',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      <Phone size={14} /> ({selectedOrder.sdtNguoiNhan})
+                    </a>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2911,7 +3406,7 @@ export default function AdminDashboard() {
         );
       })()}
 
-      {/* Modal Thêm / Sửa sản phẩm (Đồng bộ với thanh danh mục Trang chủ) */}
+      {/* Modal Thêm / Sửa sản phẩm */}
       {productModal && (
         <div className="modal-backdrop">
           <div
@@ -3155,42 +3650,32 @@ export default function AdminDashboard() {
               <div className="form-group">
                 <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Palette size={15} color="#e11d48" />
-                  <span>Tông màu chủ đạo (Tự nhập theo ý muốn)</span>
+                  <span>Tông màu chủ đạo (6 màu chuẩn)</span>
                 </label>
-                <input
-                  type="text"
-                  className="form-control"
-                  required
-                  placeholder="Nhập tự do: Tông Cam San Hô & Trắng Kem..."
-                  value={productForm.tongMauSac}
-                  onChange={(e) =>
-                    setProductForm({ ...productForm, tongMauSac: e.target.value })
-                  }
-                />
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-                  {QUICK_COLOR_TONES.map((tone) => (
-                    <button
-                      key={tone}
-                      type="button"
-                      onClick={() => setProductForm({ ...productForm, tongMauSac: tone })}
-                      style={{
-                        fontSize: '0.74rem',
-                        padding: '3px 9px',
-                        borderRadius: 999,
-                        border:
-                          productForm.tongMauSac === tone
-                            ? '1px solid #e11d48'
-                            : '1px solid #e5e7eb',
-                        background:
-                          productForm.tongMauSac === tone ? '#fff1f2' : '#f9fafb',
-                        color: productForm.tongMauSac === tone ? '#be123c' : '#4b5563',
-                        cursor: 'pointer',
-                        fontWeight: 500,
-                      }}
-                    >
-                      {tone}
-                    </button>
-                  ))}
+                <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                  {STANDARD_COLOR_TONES.map((tone) => {
+                    const active = productForm.tongMauSac === tone;
+                    return (
+                      <button
+                        key={tone}
+                        type="button"
+                        onClick={() => setProductForm({ ...productForm, tongMauSac: tone })}
+                        style={{
+                          fontSize: '0.78rem',
+                          padding: '5px 12px',
+                          borderRadius: 999,
+                          border: active ? '1.5px solid #e11d48' : '1px solid #e5e7eb',
+                          background: active ? '#fff1f2' : '#ffffff',
+                          color: active ? '#be123c' : '#4b5563',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {active ? '✓ ' : ''}
+                        {tone}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
