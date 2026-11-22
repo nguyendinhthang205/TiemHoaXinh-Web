@@ -1,4 +1,12 @@
 import axios from 'axios';
+import {
+  CATALOG_SEED_CUTOFF,
+  CURATED_CATEGORIES,
+  SERVER_PRODUCT_PATCHES,
+  EXTRA_CURATED_PRODUCTS,
+  LOCAL_FLOWER_FALLBACKS,
+  getCuratedProductById,
+} from '../data/flowerCatalog';
 
 export const API_BASE_URL = (
   import.meta.env.VITE_API_URL || 'https://tiemhoaxinh.runasp.net/api'
@@ -10,20 +18,95 @@ export const AI_BASE_URL = (
 ).replace(/\/+$/, '');
 export const AI_URL = AI_BASE_URL;
 
-const CLOUD_BIN_URL = 'https://api.npoint.io/639a3cda635df1c41eb4';
+export const CLOUD_BIN_URL = 'https://api.npoint.io/639a3cda635df1c41eb4';
 const ORDER_META_KEY = 'thx_order_meta';
 const PRODUCT_SYNC_KEY = 'thx_product_overrides';
 const REVIEWS_STORAGE_KEY = 'thx_product_reviews';
 const HOTLINE_STORAGE_KEY = 'thx_hotline_number';
 export const DEFAULT_HOTLINE = '0905 123 456';
 
-const SQL_CATEGORY_NAMES = {
+export const SQL_CATEGORY_NAMES = {
   1: 'Bó hoa tươi nghệ thuật',
   2: 'Giỏ hoa chúc mừng',
   3: 'Lẵng hoa khai trương',
   4: 'Hộp hoa cao cấp',
   5: 'Hoa cưới cầm tay',
 };
+
+// --- QUẢN LÝ PHIÊN ĐĂNG NHẬP THỐNG NHẤT ---
+export function getStoredToken() {
+  try {
+    return (
+      sessionStorage.getItem('thx_token') ||
+      sessionStorage.getItem('token') ||
+      localStorage.getItem('thx_token') ||
+      localStorage.getItem('token') ||
+      ''
+    );
+  } catch {
+    return '';
+  }
+}
+
+export function getStoredUser() {
+  try {
+    const raw =
+      sessionStorage.getItem('thx_user') ||
+      sessionStorage.getItem('user') ||
+      localStorage.getItem('thx_user') ||
+      localStorage.getItem('user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredAuth({ token = '', user = null, rememberMe = true } = {}) {
+  try {
+    const userJson = user ? JSON.stringify(user) : '';
+    if (token) {
+      sessionStorage.setItem('thx_token', token);
+      sessionStorage.setItem('token', token);
+    }
+    if (userJson) {
+      sessionStorage.setItem('thx_user', userJson);
+      sessionStorage.setItem('user', userJson);
+    }
+
+    if (rememberMe) {
+      if (token) {
+        localStorage.setItem('thx_token', token);
+        localStorage.setItem('token', token);
+      }
+      if (userJson) {
+        localStorage.setItem('thx_user', userJson);
+        localStorage.setItem('user', userJson);
+      }
+    } else {
+      localStorage.removeItem('thx_token');
+      localStorage.removeItem('token');
+      localStorage.removeItem('thx_user');
+      localStorage.removeItem('user');
+    }
+  } catch {
+    // Bỏ qua lỗi storage
+  }
+}
+
+export function clearStoredAuth() {
+  try {
+    localStorage.removeItem('thx_token');
+    localStorage.removeItem('thx_user');
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    sessionStorage.removeItem('thx_token');
+    sessionStorage.removeItem('thx_user');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('user');
+  } catch {
+    // Bỏ qua
+  }
+}
 
 let inFlightCloudGet = null;
 let lastCloudPayload = null;
@@ -42,7 +125,7 @@ async function fetchCloudWithTimeout(options = {}, timeoutMs = 5500) {
   }
 }
 
-async function getSharedCloudBin(forceFresh = false) {
+export async function getSharedCloudBin(forceFresh = false) {
   const now = Date.now();
   if (!forceFresh && lastCloudPayload && now - lastCloudFetchedAt < 4000) {
     return lastCloudPayload;
@@ -96,11 +179,10 @@ function isSameOrderMetaItem(a, b) {
 }
 
 // Dọn các dữ liệu phụ cũ trước, luôn ưu tiên giữ lại hình ảnh sản phẩm mới nhất
-function compactCloudBin(rawBin) {
+export function compactCloudBin(rawBin) {
   const safeBin =
     rawBin && typeof rawBin === 'object' && !Array.isArray(rawBin) ? { ...rawBin } : {};
 
-  // 1. Giới hạn tối đa 150 bản ghi trạng thái đơn gần nhất để tiết kiệm dung lượng
   if (
     safeBin.__order_meta__ &&
     typeof safeBin.__order_meta__ === 'object' &&
@@ -114,7 +196,6 @@ function compactCloudBin(rawBin) {
     }
   }
 
-  // 2. Xử lý danh sách ảnh/thông tin sản phẩm: không lưu trùng base64 ở khóa name:
   const overrides = safeBin.__product_overrides__;
   if (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) {
     const entries = Object.entries(overrides).sort(
@@ -144,7 +225,7 @@ function compactCloudBin(rawBin) {
   return safeBin;
 }
 
-async function pushCompactCloudBin(rawBin) {
+export async function pushCompactCloudBin(rawBin) {
   const compacted = compactCloudBin(rawBin);
   lastCloudPayload = compacted;
   lastCloudFetchedAt = Date.now();
@@ -316,6 +397,52 @@ export async function writeOrderMeta(orderId, patch) {
   return localCurrent;
 }
 
+export async function writeOrdersDeletedBatch(orderIds) {
+  if (!Array.isArray(orderIds) || orderIds.length === 0) return readLocalOrderMeta();
+  const now = Date.now();
+  const localCurrent = readLocalOrderMeta();
+
+  orderIds.forEach((id) => {
+    const idStr = String(id);
+    localCurrent[idStr] = {
+      ...(localCurrent[idStr] || {}),
+      deleted: true,
+      updatedAt: now,
+    };
+  });
+
+  try {
+    localStorage.setItem(ORDER_META_KEY, JSON.stringify(localCurrent));
+    window.dispatchEvent(new Event('thx_orders_updated'));
+  } catch {
+    // Bỏ qua
+  }
+
+  try {
+    const raw = await getSharedCloudBin(true);
+    const safeBin = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
+    const remoteMeta =
+      safeBin.__order_meta__ && typeof safeBin.__order_meta__ === 'object'
+        ? safeBin.__order_meta__
+        : {};
+
+    orderIds.forEach((id) => {
+      const idStr = String(id);
+      remoteMeta[idStr] = {
+        ...(remoteMeta[idStr] || {}),
+        deleted: true,
+        updatedAt: now,
+      };
+    });
+    safeBin.__order_meta__ = remoteMeta;
+    await pushCompactCloudBin(safeBin);
+  } catch {
+    // Giữ bản lưu cục bộ
+  }
+
+  return localCurrent;
+}
+
 export function getProductOverrides() {
   try {
     const raw = localStorage.getItem(PRODUCT_SYNC_KEY);
@@ -432,46 +559,94 @@ export async function saveProductOverride(key, patch) {
   }
 }
 
-function mergeProductOverride(product) {
+export function mergeProductOverride(product) {
   if (!product || typeof product !== 'object') return product;
+
+  const rawId = Number(product.maSanPham ?? product.MaSanPham);
+  const curatedPatch = Number.isFinite(rawId) ? SERVER_PRODUCT_PATCHES[rawId] || null : null;
+  const baseProduct = curatedPatch
+    ? {
+        ...product,
+        tenSanPham: curatedPatch.tenSanPham,
+        loaiHoa: curatedPatch.loaiHoa,
+        maDanhMuc: curatedPatch.maDanhMuc,
+        tenDanhMuc: curatedPatch.tenDanhMuc,
+        tongMauSac: curatedPatch.tongMauSac,
+        danhMucTrangChu: curatedPatch.danhMucTrangChu,
+        moTa: curatedPatch.moTa,
+        anhChinh: curatedPatch.hinhAnhChinh,
+        hinhAnhChinh: curatedPatch.hinhAnhChinh,
+        hinhAnh: curatedPatch.hinhAnhChinh,
+      }
+    : { ...product };
+
   const overrides = getProductOverrides();
-  const byId = product.maSanPham != null ? overrides[String(product.maSanPham)] : null;
-  const nameKey = product.tenSanPham
-    ? `name:${String(product.tenSanPham).trim().toLowerCase()}`
+  const byId = baseProduct.maSanPham != null ? overrides[String(baseProduct.maSanPham)] : null;
+  const nameKey = baseProduct.tenSanPham
+    ? `name:${String(baseProduct.tenSanPham).trim().toLowerCase()}`
     : '';
   const byName = nameKey ? overrides[nameKey] : null;
-  const matched = byId || byName;
 
-  const resolvedCatId = matched?.maDanhMuc ?? product.maDanhMuc;
+  // Chỉ áp dụng override mới hơn mốc chuẩn hóa bộ sưu tập (tránh dữ liệu thử nghiệm cũ ghi đè ảnh & tên đúng loài)
+  const freshById =
+    byId && Number(byId.updatedAt || 0) >= CATALOG_SEED_CUTOFF ? byId : null;
+  const freshByName =
+    byName && Number(byName.updatedAt || 0) >= CATALOG_SEED_CUTOFF ? byName : null;
+  const matched = freshById || freshByName;
+
+  const resolvedCatId = matched?.maDanhMuc ?? baseProduct.maDanhMuc;
   const resolvedCatName =
-    SQL_CATEGORY_NAMES[Number(resolvedCatId)] || product.tenDanhMuc || 'Hoa Nghệ Thuật';
+    SQL_CATEGORY_NAMES[Number(resolvedCatId)] || baseProduct.tenDanhMuc || 'Hoa Nghệ Thuật';
 
   if (!matched) {
     return {
-      ...product,
+      ...baseProduct,
       tenDanhMuc: resolvedCatName,
     };
   }
 
   const resolvedImg =
-    byId?.hinhAnhChinh ||
-    byId?.anhChinh ||
-    byName?.hinhAnhChinh ||
-    byName?.anhChinh ||
-    product.anhChinh;
+    freshById?.hinhAnhChinh ||
+    freshById?.anhChinh ||
+    freshByName?.hinhAnhChinh ||
+    freshByName?.anhChinh ||
+    baseProduct.hinhAnhChinh ||
+    baseProduct.anhChinh;
 
   return {
-    ...product,
+    ...baseProduct,
     anhChinh: resolvedImg,
-    hinhAnhChinh: resolvedImg || product.hinhAnhChinh,
-    hinhAnh: resolvedImg || product.hinhAnh,
-    tongMauSac: matched.tongMauSac || product.tongMauSac,
+    hinhAnhChinh: resolvedImg || baseProduct.hinhAnhChinh,
+    hinhAnh: resolvedImg || baseProduct.hinhAnh,
+    tongMauSac: matched.tongMauSac || baseProduct.tongMauSac,
     maDanhMuc: resolvedCatId,
     tenDanhMuc: resolvedCatName,
     danhMucTrangChu: Array.isArray(matched.danhMucTrangChu)
       ? matched.danhMucTrangChu
-      : product.danhMucTrangChu,
+      : baseProduct.danhMucTrangChu,
   };
+}
+
+export function applyOverridesToProductList(list) {
+  const safeList = Array.isArray(list) ? list : [];
+  const mergedServer = safeList.map(mergeProductOverride);
+  const existingIds = new Set(mergedServer.map((p) => Number(p.maSanPham)));
+
+  const extras = EXTRA_CURATED_PRODUCTS.filter(
+    (item) => !existingIds.has(Number(item.maSanPham))
+  ).map(mergeProductOverride);
+
+  return [...mergedServer, ...extras];
+}
+
+export function getOfflineFallbackProducts() {
+  const baseFromPatches = Object.entries(SERVER_PRODUCT_PATCHES).map(([idStr, patch]) => ({
+    maSanPham: Number(idStr),
+    giaBan: 550000,
+    soLuongTon: 18,
+    ...patch,
+  }));
+  return applyOverridesToProductList(baseFromPatches);
 }
 
 // --- HỆ THỐNG LƯU & ĐỒNG BỘ ĐÁNH GIÁ KHÁCH HÀNG ---
@@ -639,24 +814,7 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  let token = sessionStorage.getItem('thx_token') || sessionStorage.getItem('token');
-
-  if (!token) {
-    const legacyToken = localStorage.getItem('thx_token') || localStorage.getItem('token');
-    if (legacyToken) {
-      token = legacyToken;
-      sessionStorage.setItem('thx_token', legacyToken);
-      localStorage.removeItem('thx_token');
-      localStorage.removeItem('token');
-    }
-    const legacyUser = localStorage.getItem('thx_user') || localStorage.getItem('user');
-    if (legacyUser) {
-      sessionStorage.setItem('thx_user', legacyUser);
-      localStorage.removeItem('thx_user');
-      localStorage.removeItem('user');
-    }
-  }
-
+  const token = getStoredToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -666,32 +824,68 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => {
     const reqUrl = String(response?.config?.url || '').toLowerCase();
+    const isListSanPham = /^\/?sanpham\/?(\?.*)?$/.test(reqUrl);
     if (reqUrl.includes('/sanpham') && response?.data) {
       if (Array.isArray(response.data)) {
-        response.data = response.data.map(mergeProductOverride);
+        response.data = isListSanPham
+          ? applyOverridesToProductList(response.data)
+          : response.data.map(mergeProductOverride);
       } else if (Array.isArray(response.data.items)) {
-        response.data.items = response.data.items.map(mergeProductOverride);
+        response.data.items = isListSanPham
+          ? applyOverridesToProductList(response.data.items)
+          : response.data.items.map(mergeProductOverride);
       } else if (typeof response.data === 'object') {
         response.data = mergeProductOverride(response.data);
+      }
+    }
+    if (/^\/?danhmuc\/?(\?.*)?$/.test(reqUrl)) {
+      if (!Array.isArray(response.data) || response.data.length === 0) {
+        response.data = CURATED_CATEGORIES;
       }
     }
     return response;
   },
   (error) => {
+    const reqUrl = String(error?.config?.url || '').toLowerCase();
+    const method = String(error?.config?.method || 'get').toLowerCase();
+    if (method === 'get') {
+      const detailMatch = reqUrl.match(/^\/?sanpham\/(\d+)\/?$/);
+      if (detailMatch) {
+        const curated = getCuratedProductById(detailMatch[1]);
+        if (curated) {
+          return Promise.resolve({
+            data: mergeProductOverride(curated),
+            status: 200,
+            statusText: 'OK',
+            headers: {},
+            config: error.config,
+          });
+        }
+      }
+      if (/^\/?sanpham\/?(\?.*)?$/.test(reqUrl)) {
+        return Promise.resolve({
+          data: getOfflineFallbackProducts(),
+          status: 200,
+          statusText: 'OK',
+          headers: {},
+          config: error.config,
+        });
+      }
+      if (/^\/?danhmuc\/?(\?.*)?$/.test(reqUrl)) {
+        return Promise.resolve({
+          data: CURATED_CATEGORIES,
+          status: 200,
+          statusText: 'OK',
+          headers: {},
+          config: error.config,
+        });
+      }
+    }
     return Promise.reject(error);
   }
 );
 
-const FLORAL_GALLERY = [
-  'https://images.unsplash.com/photo-1561181286-d3fee7d55364?auto=format&fit=crop&w=800&q=80',
-  'https://images.unsplash.com/photo-1526047932273-341f2a7631f9?auto=format&fit=crop&w=800&q=80',
-  'https://images.unsplash.com/photo-1563241527-3004b7be0ffd?auto=format&fit=crop&w=800&q=80',
-  'https://images.unsplash.com/photo-1519378058457-4c29a0a2efac?auto=format&fit=crop&w=800&q=80',
-  'https://images.unsplash.com/photo-1490750967868-88aa4486c946?auto=format&fit=crop&w=800&q=80',
-  'https://images.unsplash.com/photo-1582794543139-8ac9cb0f7b11?auto=format&fit=crop&w=800&q=80',
-  'https://images.unsplash.com/photo-1508610048659-a06b669e3321?auto=format&fit=crop&w=800&q=80',
-  'https://images.unsplash.com/photo-1455659817273-f96807779a8a?auto=format&fit=crop&w=800&q=80',
-];
+const FLORAL_GALLERY = LOCAL_FLOWER_FALLBACKS;
 
 export function getFlowerImage(product) {
   const enriched = mergeProductOverride(product);
@@ -707,6 +901,8 @@ export function getFlowerImage(product) {
   if (typeof raw === 'string' && raw.trim()) {
     const trimmed = raw.trim();
     if (
+      trimmed.startsWith('/images/') ||
+      trimmed.startsWith('./images/') ||
       trimmed.startsWith('data:image/') ||
       trimmed.startsWith('http://') ||
       trimmed.startsWith('https://')

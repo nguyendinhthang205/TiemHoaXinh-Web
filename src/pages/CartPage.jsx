@@ -12,6 +12,8 @@ import {
   Ticket,
   Check,
   Star,
+  Sparkles,
+  Heart,
 } from 'lucide-react';
 import api, {
   formatVND,
@@ -20,9 +22,10 @@ import api, {
   saveProductReview,
 } from '../services/api';
 import { useApp } from '../context/AppContext';
+import { STORE_INFO } from '../utils/storeUtils';
 
-const SHIPPING_RATE_PER_KM = 5000;
-const SHOP_PICKUP_ADDRESS = '120 Lê Duẩn, Quận Hải Châu, TP. Đà Nẵng';
+const SHIPPING_RATE_PER_KM = STORE_INFO.shippingRatePerKm;
+const SHOP_PICKUP_ADDRESS = STORE_INFO.address;
 
 const STORE_VOUCHERS = [
   {
@@ -72,7 +75,15 @@ const QUICK_REVIEW_TAGS = [
 ];
 
 export default function CartPage() {
-  const { user, cartItems, fetchCart, showToast } = useApp();
+  const {
+    user,
+    cartItems,
+    fetchCart,
+    updateCartItemQty,
+    removeCartItem,
+    clearEntireCart,
+    showToast,
+  } = useApp();
   const navigate = useNavigate();
 
   const getDefaultDeliveryDate = () => {
@@ -100,10 +111,17 @@ export default function CartPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [qrOrder, setQrOrder] = useState(null);
 
-  // Hộp thoại đánh giá ngay sau khi đặt hoa xong
   const [postOrderReviewData, setPostOrderReviewData] = useState(null);
   const [reviewDrafts, setReviewDrafts] = useState({});
   const [submittingReviews, setSubmittingReviews] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setTenNguoiNhan((prev) => prev || user.hoTen || '');
+      if (user.soDienThoai) setSdtNguoiNhan(user.soDienThoai);
+      if (user.diaChi) setDiaChiGiao(user.diaChi);
+    }
+  }, [user]);
 
   useEffect(() => {
     api
@@ -125,8 +143,7 @@ export default function CartPage() {
     }
     setErrorMsg('');
     try {
-      await api.put(`/GioHang/${item.maSanPham}`, { soLuong: newQty });
-      await fetchCart();
+      await updateCartItemQty(item, newQty);
     } catch (err) {
       const msg = err.response?.data?.message || 'Không thể cập nhật số lượng';
       setErrorMsg(msg);
@@ -137,8 +154,7 @@ export default function CartPage() {
   const removeItem = async (item) => {
     setErrorMsg('');
     try {
-      await api.delete(`/GioHang/${item.maSanPham}`);
-      await fetchCart();
+      await removeCartItem(item);
       showToast(`Đã xóa "${item.tenSanPham}" khỏi giỏ hàng!`);
     } catch (err) {
       const msg = err.response?.data?.message || 'Không thể xóa sản phẩm khỏi giỏ hàng';
@@ -150,8 +166,7 @@ export default function CartPage() {
   const clearAllCart = async () => {
     setErrorMsg('');
     try {
-      await api.delete('/GioHang');
-      await fetchCart();
+      await clearEntireCart();
       setSelectedVoucherCode('');
       showToast('Đã làm trống toàn bộ giỏ hàng!');
     } catch (err) {
@@ -165,6 +180,11 @@ export default function CartPage() {
     (sum, item) => sum + (item.giaBan || item.donGia || 0) * (item.soLuong || 1),
     0
   );
+
+  const hasOverStock = cartItems.some((item) => {
+    const stock = stockMap[item.maSanPham];
+    return typeof stock === 'number' && item.soLuong > stock;
+  });
 
   const validKm = deliveryMethod === 'ship' ? Math.max(1, Number(distanceKm) || 1) : 0;
   const shippingFee = deliveryMethod === 'ship' ? validKm * SHIPPING_RATE_PER_KM : 0;
@@ -195,6 +215,10 @@ export default function CartPage() {
       discountAmount = Math.min(shippingFee, selectedVoucher.value);
     }
   }
+
+  const nextVoucherUnlock = STORE_VOUCHERS.filter(
+    (v) => v.minSubtotal > flowerSubtotal
+  ).sort((a, b) => a.minSubtotal - b.minSubtotal)[0];
 
   const totalAmount = Math.max(0, flowerSubtotal + shippingFee - discountAmount);
 
@@ -294,6 +318,12 @@ export default function CartPage() {
       navigate('/login');
       return;
     }
+    if (hasOverStock) {
+      const msg = 'Một số bó hoa vượt quá số lượng tồn kho hiện có. Vui lòng điều chỉnh lại số lượng.';
+      setErrorMsg(msg);
+      showToast(msg, 'error');
+      return;
+    }
 
     const orderedSnapshot = cartItems.map((it) => ({
       maSanPham: it.maSanPham,
@@ -316,9 +346,17 @@ export default function CartPage() {
       ? ` | [Voucher ${selectedVoucher.code}: -${formatVND(discountAmount)}]`
       : '';
 
+    const curatedLocalItems = cartItems.filter((it) => it.isCuratedLocal);
+    const curatedTag =
+      curatedLocalItems.length > 0
+        ? ` | [Mẫu tuyển chọn: ${curatedLocalItems
+            .map((it) => `${it.tenSanPham} x${it.soLuong || 1}`)
+            .join(', ')}]`
+        : '';
+
     const fullNote = `${
       ghiChu.trim() ? `${ghiChu.trim()} | ` : ''
-    }${shippingTag}${voucherTag}`;
+    }${shippingTag}${voucherTag}${curatedTag}`;
 
     const payload = {
       tenNguoiNhan: tenNguoiNhan.trim(),
@@ -337,12 +375,25 @@ export default function CartPage() {
 
     try {
       setSubmitting(true);
+      const hasServerCartItem = cartItems.some((it) => !it.isCuratedLocal);
+      if (!hasServerCartItem && curatedLocalItems.length > 0) {
+        const proxyId = curatedLocalItems[0].checkoutProxyId || 24;
+        await api
+          .post('/GioHang', {
+            maSanPham: proxyId,
+            soLuong: curatedLocalItems.reduce((s, it) => s + Number(it.soLuong || 1), 0),
+          })
+          .catch(() => {});
+      }
+
       const res = await api.post('/DonHang', payload);
-      await fetchCart();
+      await clearEntireCart();
       const created = res.data?.donHang || res.data;
       const orderId = created?.maDonHang || created?.id || '';
       const baseFlowerMoney =
-        Number(created?.tongThanhToan) > 0
+        curatedLocalItems.length > 0
+          ? flowerSubtotal
+          : Number(created?.tongThanhToan) > 0
           ? Number(created.tongThanhToan)
           : flowerSubtotal;
       const finalMoney = Math.max(0, baseFlowerMoney + shippingFee - discountAmount);
@@ -410,12 +461,12 @@ export default function CartPage() {
 
   if (!user) {
     return (
-      <div className="container" style={{ marginTop: 48 }}>
-        <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
+      <div className="container" style={{ marginTop: 48, marginBottom: 48 }}>
+        <div className="panel" style={{ textAlign: 'center', padding: 48, maxWidth: 540, margin: '0 auto' }}>
           <ShoppingBag size={42} color="#e11d48" style={{ marginBottom: 12 }} />
           <h2>Vui lòng đăng nhập để xem giỏ hàng</h2>
-          <p style={{ color: '#6b7280', margin: '10px 0 20px' }}>
-            Đăng nhập bằng tài khoản khách hàng hoặc quản trị để trải nghiệm đặt hoa và thanh toán VietQR.
+          <p style={{ color: '#6b7280', margin: '10px 0 20px', fontSize: '0.92rem' }}>
+            Đăng nhập tài khoản để lưu giỏ hoa, áp dụng Voucher ưu đãi và thanh toán nhanh qua VietQR.
           </p>
           <Link to="/login" className="btn btn-primary">
             Đi tới trang Đăng nhập
@@ -425,36 +476,107 @@ export default function CartPage() {
     );
   }
 
+  const currentCheckoutStep = qrOrder ? 3 : cartItems.length > 0 ? 2 : 1;
+
   return (
-    <div className="container" style={{ marginTop: 32, marginBottom: 48 }}>
-      <h1 style={{ fontSize: '2rem', marginBottom: 22 }}>Giỏ Hàng &amp; Thanh Toán</h1>
+    <div className="container" style={{ marginTop: 28, marginBottom: 56 }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 14,
+          marginBottom: 22,
+        }}
+      >
+        <h1 style={{ fontSize: 'clamp(1.6rem, 2.8vw, 2.1rem)' }}>
+          Giỏ Hàng &amp; Thanh Toán
+        </h1>
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: '0.8rem',
+            fontWeight: 600,
+          }}
+        >
+          {[
+            { num: 1, label: 'Chọn hoa' },
+            { num: 2, label: 'Giao nhận & Thiệp' },
+            { num: 3, label: 'Hoàn tất' },
+          ].map((s, idx) => {
+            const active = currentCheckoutStep >= s.num;
+            return (
+              <React.Fragment key={s.num}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    color: active ? '#be123c' : '#9ca3af',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: '50%',
+                      background: active ? '#e11d48' : '#f3f4f6',
+                      color: active ? '#ffffff' : '#6b7280',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '0.73rem',
+                      fontWeight: 800,
+                    }}
+                  >
+                    {s.num}
+                  </span>
+                  <span>{s.label}</span>
+                </span>
+                {idx < 2 && <span style={{ color: '#d1d5db' }}>&rarr;</span>}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
 
       {cartItems.length === 0 && !qrOrder && !postOrderReviewData ? (
-        <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
-          <p style={{ color: '#6b7280', marginBottom: 18 }}>
-            Giỏ hàng của bạn hiện đang trống.
+        <div className="panel" style={{ textAlign: 'center', padding: 52 }}>
+          <ShoppingBag size={42} color="#fecdd3" style={{ marginBottom: 12 }} />
+          <h3 style={{ marginBottom: 6 }}>Giỏ hàng của bạn hiện đang trống</h3>
+          <p style={{ color: '#6b7280', marginBottom: 18, fontSize: '0.9rem' }}>
+            Hãy chọn một bó hoa tươi thắm hoặc nhờ Smart AI gợi ý theo dịp tặng nhé!
           </p>
-          <Link to="/#catalog" className="btn btn-primary">
-            Chọn hoa ngay
-          </Link>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <Link to="/#catalog" className="btn btn-primary">
+              Chọn hoa ngay
+            </Link>
+            <Link to="/shop?goiY=dip#ai-concierge" className="btn btn-outline">
+              <Sparkles size={15} /> Smart AI Chọn Hoa
+            </Link>
+          </div>
         </div>
       ) : (
         <div
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))',
-            gap: 28,
+            gap: 24,
             alignItems: 'start',
           }}
         >
-          {/* Cột 1: Danh sách sản phẩm + Chọn Voucher + Tóm tắt tiền */}
+          {/* Cột 1: Danh sách sản phẩm + Voucher + Tóm tắt tiền */}
           <div className="panel">
             <div
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                marginBottom: 16,
+                marginBottom: 14,
               }}
             >
               <h3>Danh sách bó hoa ({cartItems.length})</h3>
@@ -463,7 +585,7 @@ export default function CartPage() {
                   type="button"
                   onClick={clearAllCart}
                   className="btn btn-outline btn-sm"
-                  style={{ color: '#ef4444' }}
+                  style={{ color: '#dc2626', borderColor: '#fecaca' }}
                 >
                   Xóa tất cả
                 </button>
@@ -479,8 +601,8 @@ export default function CartPage() {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 14,
-                    padding: '14px 0',
+                    gap: 13,
+                    padding: '13px 0',
                     borderBottom: '1px solid #f3f4f6',
                   }}
                 >
@@ -489,15 +611,23 @@ export default function CartPage() {
                     alt={item.tenSanPham}
                     style={{ width: 68, height: 68, borderRadius: 12, objectFit: 'cover' }}
                   />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700 }}>{item.tenSanPham}</div>
-                    <div style={{ color: '#e11d48', fontWeight: 600, fontSize: '0.92rem' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Link
+                      to={`/product/${item.maSanPham}`}
+                      style={{ fontWeight: 700, color: '#181316', display: 'block' }}
+                    >
+                      {item.tenSanPham}
+                    </Link>
+                    <div
+                      className="tabular-nums"
+                      style={{ color: '#e11d48', fontWeight: 700, fontSize: '0.9rem' }}
+                    >
                       {formatVND(item.giaBan || item.donGia)}
                     </div>
                     {typeof stock === 'number' && (
                       <div
                         style={{
-                          fontSize: '0.78rem',
+                          fontSize: '0.77rem',
                           color: overStock ? '#dc2626' : '#6b7280',
                         }}
                       >
@@ -512,7 +642,7 @@ export default function CartPage() {
                               textDecoration: 'underline',
                               background: 'none',
                               fontWeight: 700,
-                              fontSize: '0.78rem',
+                              fontSize: '0.77rem',
                             }}
                           >
                             (Giảm về {stock} bó)
@@ -529,7 +659,7 @@ export default function CartPage() {
                     >
                       -
                     </button>
-                    <span style={{ minWidth: 24, textAlign: 'center', fontWeight: 700 }}>
+                    <span className="tabular-nums" style={{ minWidth: 24, textAlign: 'center', fontWeight: 700 }}>
                       {item.soLuong}
                     </span>
                     <button
@@ -545,8 +675,9 @@ export default function CartPage() {
                     onClick={() => removeItem(item)}
                     style={{ background: 'transparent', color: '#ef4444', padding: 6 }}
                     title="Xóa khỏi giỏ"
+                    aria-label="Xóa khỏi giỏ"
                   >
-                    <Trash2 size={18} />
+                    <Trash2 size={17} />
                   </button>
                 </div>
               );
@@ -557,7 +688,7 @@ export default function CartPage() {
               style={{
                 marginTop: 18,
                 padding: 14,
-                borderRadius: 14,
+                borderRadius: 16,
                 background: '#fffafb',
                 border: '1px solid #fce7f3',
               }}
@@ -567,7 +698,7 @@ export default function CartPage() {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  marginBottom: 10,
+                  marginBottom: 8,
                 }}
               >
                 <div
@@ -589,17 +720,32 @@ export default function CartPage() {
                     onClick={() => setSelectedVoucherCode('')}
                     style={{
                       background: 'transparent',
-                      border: 'none',
                       color: '#6b7280',
                       fontSize: '0.76rem',
                       textDecoration: 'underline',
-                      cursor: 'pointer',
                     }}
                   >
                     Bỏ chọn
                   </button>
                 )}
               </div>
+
+              {nextVoucherUnlock && (
+                <div
+                  style={{
+                    fontSize: '0.77rem',
+                    color: '#9f1239',
+                    background: '#fff1f2',
+                    padding: '6px 10px',
+                    borderRadius: 10,
+                    marginBottom: 10,
+                    fontWeight: 600,
+                  }}
+                >
+                  Thêm <b>{formatVND(nextVoucherUnlock.minSubtotal - flowerSubtotal)}</b> tiền hoa để mở khóa mã{' '}
+                  <b>{nextVoucherUnlock.badge}</b>!
+                </div>
+              )}
 
               <div
                 style={{
@@ -632,11 +778,9 @@ export default function CartPage() {
                           ? '#ffffff'
                           : '#f9fafb',
                         opacity: eligible ? 1 : 0.65,
-                        cursor: 'pointer',
                         display: 'flex',
                         flexDirection: 'column',
                         gap: 3,
-                        transition: 'all 0.15s ease',
                       }}
                     >
                       <div
@@ -673,13 +817,7 @@ export default function CartPage() {
                           </span>
                         )}
                       </div>
-                      <div
-                        style={{
-                          fontSize: '0.74rem',
-                          color: '#4b5563',
-                          lineHeight: 1.3,
-                        }}
-                      >
+                      <div style={{ fontSize: '0.73rem', color: '#4b5563', lineHeight: 1.3 }}>
                         {v.desc}
                       </div>
                     </button>
@@ -691,7 +829,7 @@ export default function CartPage() {
             <div style={{ paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563' }}>
                 <span>Tạm tính tiền hoa:</span>
-                <b>{formatVND(flowerSubtotal)}</b>
+                <b className="tabular-nums">{formatVND(flowerSubtotal)}</b>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563' }}>
@@ -700,7 +838,7 @@ export default function CartPage() {
                     ? `Phí ship tận nơi (${validKm} km × 5.000 đ/km):`
                     : 'Phí nhận tại cửa hàng:'}
                 </span>
-                <b style={{ color: shippingFee === 0 ? '#16a34a' : '#111827' }}>
+                <b className="tabular-nums" style={{ color: shippingFee === 0 ? '#16a34a' : '#181316' }}>
                   {shippingFee === 0 ? 'Miễn phí (0 đ)' : formatVND(shippingFee)}
                 </b>
               </div>
@@ -715,7 +853,7 @@ export default function CartPage() {
                   }}
                 >
                   <span>Ưu đãi Voucher ({selectedVoucher.badge}):</span>
-                  <b>-{formatVND(discountAmount)}</b>
+                  <b className="tabular-nums">-{formatVND(discountAmount)}</b>
                 </div>
               )}
 
@@ -731,14 +869,16 @@ export default function CartPage() {
                 }}
               >
                 <span>Tổng thanh toán:</span>
-                <span style={{ color: '#e11d48' }}>{formatVND(totalAmount)}</span>
+                <span className="tabular-nums" style={{ color: '#e11d48' }}>
+                  {formatVND(totalAmount)}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Cột 2: Form thông tin nhận hoa */}
+          {/* Cột 2: Form thông tin nhận hoa & Xem trước thiệp */}
           <div className="panel">
-            <h3 style={{ marginBottom: 16 }}>Thông tin nhận hoa &amp; lời chúc</h3>
+            <h3 style={{ marginBottom: 16 }}>Thông tin nhận hoa &amp; Lời chúc</h3>
             <form onSubmit={handleCheckout}>
               <div className="form-group">
                 <label className="form-label">Hình thức nhận hoa</label>
@@ -760,12 +900,11 @@ export default function CartPage() {
                       flexDirection: 'column',
                       alignItems: 'center',
                       gap: 4,
-                      cursor: 'pointer',
                     }}
                   >
                     <Truck size={20} />
                     <span>Ship tận nơi</span>
-                    <span style={{ fontSize: '0.76rem', fontWeight: 500 }}>5.000 đ / km</span>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 500 }}>5.000 đ / km</span>
                   </button>
 
                   <button
@@ -785,38 +924,39 @@ export default function CartPage() {
                       flexDirection: 'column',
                       alignItems: 'center',
                       gap: 4,
-                      cursor: 'pointer',
                     }}
                   >
                     <Store size={20} />
                     <span>Tới tiệm lấy</span>
-                    <span style={{ fontSize: '0.76rem', fontWeight: 500, color: '#16a34a' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 500, color: '#16a34a' }}>
                       Miễn phí ship (0 đ)
                     </span>
                   </button>
                 </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Tên người nhận hoa</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  required
-                  value={tenNguoiNhan}
-                  onChange={(e) => setTenNguoiNhan(e.target.value)}
-                />
-              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Tên người nhận hoa</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    required
+                    value={tenNguoiNhan}
+                    onChange={(e) => setTenNguoiNhan(e.target.value)}
+                  />
+                </div>
 
-              <div className="form-group">
-                <label className="form-label">Số điện thoại nhận</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  required
-                  value={sdtNguoiNhan}
-                  onChange={(e) => setSdtNguoiNhan(e.target.value)}
-                />
+                <div className="form-group">
+                  <label className="form-label">Số điện thoại nhận</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    required
+                    value={sdtNguoiNhan}
+                    onChange={(e) => setSdtNguoiNhan(e.target.value)}
+                  />
+                </div>
               </div>
 
               {deliveryMethod === 'ship' ? (
@@ -837,7 +977,7 @@ export default function CartPage() {
                     <label className="form-label">
                       Khoảng cách giao hàng (Km) — Đơn giá <b>5.000 đ/km</b>
                     </label>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <input
                         type="number"
                         min="1"
@@ -847,7 +987,7 @@ export default function CartPage() {
                         required
                         value={distanceKm}
                         onChange={(e) => setDistanceKm(e.target.value)}
-                        style={{ maxWidth: 110 }}
+                        style={{ maxWidth: 105 }}
                       />
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         {[2, 5, 8, 12].map((km) => (
@@ -876,22 +1016,15 @@ export default function CartPage() {
                     color: '#166534',
                     padding: '12px 14px',
                     borderRadius: 12,
-                    fontSize: '0.88rem',
+                    fontSize: '0.86rem',
                     marginBottom: 14,
                   }}
                 >
-                  📍 <b>Địa chỉ cửa hàng nhận hoa:</b> {SHOP_PICKUP_ADDRESS} (Mở cửa 07:00 –
-                  21:30 hằng ngày).
+                  <b>Địa chỉ nhận hoa tại tiệm:</b> {SHOP_PICKUP_ADDRESS} ({STORE_INFO.openHours}).
                 </div>
               )}
 
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: 12,
-                }}
-              >
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
                   <label className="form-label">
                     {deliveryMethod === 'ship' ? 'Ngày giao hoa' : 'Ngày tới lấy hoa'}
@@ -925,13 +1058,46 @@ export default function CartPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Nội dung thiệp chúc mừng</label>
+                <label className="form-label">Nội dung thiệp chúc mừng (Tặng miễn phí)</label>
                 <textarea
                   className="form-control"
                   rows={2}
                   value={ghiChu}
                   onChange={(e) => setGhiChu(e.target.value)}
                 />
+                {ghiChu.trim() && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: '12px 14px',
+                      borderRadius: 12,
+                      background: 'linear-gradient(135deg, #fffdfb 0%, #fff1f2 100%)',
+                      border: '1px dashed #fda4af',
+                      fontSize: '0.82rem',
+                      color: '#881337',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: '#be123c',
+                        marginBottom: 4,
+                      }}
+                    >
+                      <Heart size={12} fill="#be123c" />
+                      <span>Xem trước thiệp viết tay gửi {tenNguoiNhan || 'người nhận'}</span>
+                    </div>
+                    <div className="serif-title" style={{ fontStyle: 'italic', fontSize: '0.94rem' }}>
+                      “{ghiChu.trim()}”
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
@@ -958,7 +1124,7 @@ export default function CartPage() {
                     color: '#991b1b',
                     padding: '10px 14px',
                     borderRadius: 10,
-                    fontSize: '0.88rem',
+                    fontSize: '0.87rem',
                     marginBottom: 14,
                     display: 'flex',
                     alignItems: 'center',
@@ -972,9 +1138,9 @@ export default function CartPage() {
 
               <button
                 type="submit"
-                className="btn btn-primary"
-                style={{ width: '100%', padding: 13 }}
-                disabled={submitting}
+                className="btn btn-primary btn-lg"
+                style={{ width: '100%' }}
+                disabled={submitting || hasOverStock}
               >
                 {submitting
                   ? 'Đang xử lý đơn hàng...'
@@ -1005,7 +1171,6 @@ export default function CartPage() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                cursor: 'pointer',
               }}
             >
               <X size={18} />
@@ -1015,7 +1180,9 @@ export default function CartPage() {
             <h2>Quét Mã VietQR Để Thanh Toán</h2>
             <p style={{ color: '#6b7280', fontSize: '0.9rem', margin: '8px 0 16px' }}>
               Đơn hàng <b>#{qrOrder.maDonHang}</b> &bull; Số tiền:{' '}
-              <b style={{ color: '#e11d48' }}>{formatVND(qrOrder.tongTien)}</b>
+              <b className="tabular-nums" style={{ color: '#e11d48' }}>
+                {formatVND(qrOrder.tongTien)}
+              </b>
             </p>
             <img
               src={qrOrder.qrUrl}
@@ -1128,9 +1295,7 @@ export default function CartPage() {
                                 }
                                 style={{
                                   background: 'transparent',
-                                  border: 'none',
                                   padding: 2,
-                                  cursor: 'pointer',
                                 }}
                               >
                                 <Star
@@ -1162,7 +1327,6 @@ export default function CartPage() {
                               border: '1px solid #fecdd3',
                               background: '#ffffff',
                               color: '#be123c',
-                              cursor: 'pointer',
                             }}
                           >
                             + {tag}

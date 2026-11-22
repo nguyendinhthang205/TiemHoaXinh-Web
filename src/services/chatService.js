@@ -1,4 +1,5 @@
-const NPOINT_URL = 'https://api.npoint.io/639a3cda635df1c41eb4';
+import { getSharedCloudBin, pushCompactCloudBin } from './api';
+
 const CHAT_STORAGE_KEY = 'thx_support_chats_v1';
 const GUEST_ID_KEY = 'thx_chat_guest_id';
 
@@ -32,22 +33,8 @@ function writeLocalChats(data) {
   }
 }
 
-async function fetchRawCloudBin() {
-  try {
-    const res = await fetch(NPOINT_URL, {
-      method: 'GET',
-      cache: 'no-store',
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
-  } catch {
-    return null;
-  }
-}
-
 async function fetchLatestCloudChats() {
-  const raw = await fetchRawCloudBin();
+  const raw = await getSharedCloudBin(true);
   if (!raw) return readLocalChats();
   return extractChatEntries(raw);
 }
@@ -56,20 +43,13 @@ async function pushCloudChats(chatMap) {
   const cleanChats = extractChatEntries(chatMap);
   writeLocalChats(cleanChats);
   try {
-    const latestRaw = (await fetchRawCloudBin()) || {};
+    const latestRaw = (await getSharedCloudBin(true)) || {};
     const nextBin = { ...latestRaw };
     Object.keys(nextBin).forEach((k) => {
       if (!k.startsWith('__')) delete nextBin[k];
     });
     Object.assign(nextBin, cleanChats);
-
-    await fetch(NPOINT_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(nextBin),
-    });
+    await pushCompactCloudBin(nextBin);
   } catch {
     // Giữ bản lưu cục bộ nếu mạng gián đoạn
   }

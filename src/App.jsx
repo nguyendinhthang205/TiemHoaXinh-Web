@@ -4,11 +4,16 @@ import {
   Routes,
   Route,
   Navigate,
+  useLocation,
   useInRouterContext,
 } from 'react-router-dom';
-import * as AppCtxModule from './context/AppContext';
+import { AppProvider, useApp } from './context/AppContext';
 import Navbar from './components/Navbar';
+import Footer from './components/Footer';
+import ErrorBoundary from './components/ErrorBoundary';
+import ScrollToTop from './components/ScrollToTop';
 import CustomerChatWidget from './components/CustomerChatWidget';
+import WishlistDrawer from './components/WishlistDrawer';
 import HomePage from './pages/HomePage';
 import ShopPage from './pages/ShopPage';
 import ProductDetailPage from './pages/ProductDetailPage';
@@ -18,13 +23,9 @@ import MyOrdersPage from './pages/MyOrdersPage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 
 function AppLayout() {
-  const existingCtx =
-    typeof AppCtxModule.useApp === 'function' ? AppCtxModule.useApp() : null;
-
-  const ProviderComponent =
-    AppCtxModule.AppProvider ||
-    AppCtxModule.AppContextProvider ||
-    AppCtxModule.default;
+  const location = useLocation();
+  const isAdminRoute = location.pathname.toLowerCase().startsWith('/admin');
+  const existingCtx = useApp();
 
   const content = (
     <div
@@ -32,47 +33,52 @@ function AppLayout() {
         minHeight: '100vh',
         display: 'flex',
         flexDirection: 'column',
-        background: '#fffafb',
+        background: 'var(--bg-cream)',
       }}
     >
+      <ScrollToTop />
       <Navbar />
+      <WishlistDrawer />
       <CustomerChatWidget />
 
       <main style={{ flex: 1 }}>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/shop" element={<ShopPage />} />
-          <Route path="/product/:id" element={<ProductDetailPage />} />
-          <Route path="/products/:id" element={<ProductDetailPage />} />
-          <Route path="/cart" element={<CartPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/my-orders" element={<MyOrdersPage />} />
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/shop" element={<ShopPage />} />
+            <Route path="/product/:id" element={<ProductDetailPage />} />
+            <Route path="/products/:id" element={<ProductDetailPage />} />
+            <Route path="/cart" element={<CartPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/my-orders" element={<MyOrdersPage />} />
+            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </ErrorBoundary>
       </main>
 
-      <footer
-        style={{
-          background: '#ffffff',
-          borderTop: '1px solid #f3f4f6',
-          padding: '20px 0',
-          marginTop: 40,
-          textAlign: 'center',
-          fontSize: '0.85rem',
-          color: '#6b7280',
-        }}
-      >
-        <div className="container">
-          <strong style={{ color: '#be123c' }}>Tiệm Hoa Xinh</strong> &mdash; Hoa Tươi Nghệ
-          Thuật &amp; Hệ Thống Dự Báo Nhập Hàng AI &bull; 120 Lê Duẩn, Hải Châu, Đà Nẵng
-        </div>
-      </footer>
+      {isAdminRoute ? (
+        <footer
+          style={{
+            background: '#ffffff',
+            borderTop: '1px solid #f1e6ea',
+            padding: '14px 20px',
+            textAlign: 'center',
+            fontSize: '0.8rem',
+            color: '#6b7280',
+          }}
+        >
+          <strong style={{ color: '#9f1239' }}>Tiệm Hoa Xinh Admin</strong> &bull; Hệ Thống
+          Quản Trị &amp; Dự Báo Nhập Hàng AI &bull; 120 Lê Duẩn, Hải Châu, Đà Nẵng
+        </footer>
+      ) : (
+        <Footer />
+      )}
     </div>
   );
 
-  if (!existingCtx && ProviderComponent) {
-    return <ProviderComponent>{content}</ProviderComponent>;
+  if (!existingCtx) {
+    return <AppProvider>{content}</AppProvider>;
   }
   return content;
 }

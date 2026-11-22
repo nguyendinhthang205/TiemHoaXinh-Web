@@ -25,6 +25,7 @@ import api, {
   writeOrderMeta,
 } from '../services/api';
 import { useApp } from '../context/AppContext';
+import ConfirmModal from '../components/ConfirmModal';
 
 function extractCustomerRawStatus(order, meta = {}) {
   if (meta.statusOverride) return meta.statusOverride;
@@ -42,6 +43,7 @@ function translateCustomerOrderStatus(rawStatus = '', isPickup = false) {
   const s = String(rawStatus || '').trim().toLowerCase();
   if (s.includes('cancel') || s.includes('hủy')) {
     return {
+      code: 'Cancelled',
       label: 'Đã hủy',
       step: -1,
       isPending: false,
@@ -61,6 +63,7 @@ function translateCustomerOrderStatus(rawStatus = '', isPickup = false) {
     s.includes('thành công')
   ) {
     return {
+      code: 'Completed',
       label: isPickup ? 'Khách đã nhận hoa' : 'Đã giao thành công',
       step: 3,
       isPending: false,
@@ -78,6 +81,7 @@ function translateCustomerOrderStatus(rawStatus = '', isPickup = false) {
     s.includes('vận chuyển')
   ) {
     return {
+      code: 'Shipping',
       label: isPickup ? 'Sẵn sàng tại tiệm' : 'Shipper đang giao',
       step: 2,
       isPending: false,
@@ -94,6 +98,7 @@ function translateCustomerOrderStatus(rawStatus = '', isPickup = false) {
     (s.includes('xác nhận') && !s.includes('chờ'))
   ) {
     return {
+      code: 'Confirmed',
       label: 'Đang cắm hoa',
       step: 1,
       isPending: false,
@@ -104,6 +109,7 @@ function translateCustomerOrderStatus(rawStatus = '', isPickup = false) {
     };
   }
   return {
+    code: 'Pending',
     label: 'Chờ xác nhận',
     step: 0,
     isPending: true,
@@ -120,7 +126,9 @@ export default function MyOrdersPage() {
   const [productMap, setProductMap] = useState({});
   const [orderMetaMap, setOrderMetaMap] = useState(() => readLocalOrderMeta());
   const [loading, setLoading] = useState(true);
+  const [statusTab, setStatusTab] = useState('ALL');
   const [cancelingId, setCancelingId] = useState(null);
+  const [confirmCancelOrderId, setConfirmCancelOrderId] = useState(null);
   const [qrOrder, setQrOrder] = useState(null);
 
   const loadOrders = useCallback(async () => {
@@ -190,7 +198,6 @@ export default function MyOrdersPage() {
     loadOrders();
   }, [loadOrders]);
 
-  // Tự động kiểm tra trạng thái đơn hàng mới nhất từ Admin mỗi 4 giây
   useEffect(() => {
     if (!user) return undefined;
     const handleMetaEvent = () => setOrderMetaMap(readLocalOrderMeta());
@@ -198,8 +205,9 @@ export default function MyOrdersPage() {
     window.addEventListener('storage', handleMetaEvent);
 
     const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       syncOrderMetaFromCloud().then((latest) => setOrderMetaMap(latest));
-    }, 4000);
+    }, 5000);
 
     return () => {
       window.removeEventListener('thx_orders_updated', handleMetaEvent);
@@ -208,8 +216,9 @@ export default function MyOrdersPage() {
     };
   }, [user]);
 
-  const handleCancelOrder = async (orderId) => {
-    if (!window.confirm(`Bạn có chắc muốn hủy đơn hàng #${orderId} không?`)) return;
+  const executeCancelOrder = async () => {
+    const orderId = confirmCancelOrderId;
+    if (!orderId) return;
     try {
       setCancelingId(orderId);
       try {
@@ -225,6 +234,7 @@ export default function MyOrdersPage() {
       showToast(`Đã hủy đơn hàng #${orderId} thành công!`);
     } finally {
       setCancelingId(null);
+      setConfirmCancelOrderId(null);
     }
   };
 
@@ -261,7 +271,7 @@ export default function MyOrdersPage() {
   if (!user) {
     return (
       <div className="container" style={{ marginTop: 48 }}>
-        <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
+        <div className="panel" style={{ textAlign: 'center', padding: 48, maxWidth: 520, margin: '0 auto' }}>
           <ShoppingBag size={42} color="#e11d48" style={{ marginBottom: 12 }} />
           <h2>Vui lòng đăng nhập để xem đơn hàng</h2>
           <Link to="/login" className="btn btn-primary" style={{ marginTop: 14 }}>
@@ -272,38 +282,30 @@ export default function MyOrdersPage() {
     );
   }
 
-  return (
-    <div className="container" style={{ marginTop: 32, marginBottom: 64 }}>
-      <style>{`
-        .thx-order-steps {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 8px;
-          padding: 16px 12px;
-          margin: 14px 0 4px;
-          background: #fafafa;
-          border-radius: 14px;
-          border: 1px solid #f3f4f6;
-        }
-        @media (max-width: 600px) {
-          .thx-order-steps {
-            grid-template-columns: repeat(2, 1fr);
-            gap: 12px 8px;
-          }
-        }
-      `}</style>
+  const visibleOrders = orders.filter((order) => {
+    const meta = orderMetaMap[order.maDonHang] || {};
+    if (meta.deleted) return false;
+    const stInfo = translateCustomerOrderStatus(extractCustomerRawStatus(order, meta));
+    if (statusTab === 'ALL') return true;
+    if (statusTab === 'IN_PROGRESS') {
+      return stInfo.code === 'Pending' || stInfo.code === 'Confirmed' || stInfo.code === 'Shipping';
+    }
+    return stInfo.code === statusTab;
+  });
 
+  return (
+    <div className="container" style={{ marginTop: 28, marginBottom: 64 }}>
       <div
         style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          marginBottom: 22,
+          marginBottom: 16,
           flexWrap: 'wrap',
           gap: 12,
         }}
       >
-        <h1 style={{ fontSize: '1.85rem' }}>Đơn Hàng Của Tôi ({orders.length})</h1>
+        <h1 style={{ fontSize: '1.9rem' }}>Đơn Hàng Của Tôi ({orders.length})</h1>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             type="button"
@@ -314,28 +316,59 @@ export default function MyOrdersPage() {
             <RefreshCw size={14} />
             <span>{loading ? 'Đang đồng bộ...' : 'Cập nhật trạng thái'}</span>
           </button>
-          <Link to="/shop" className="btn btn-primary btn-sm">
+          <Link to="/#catalog" className="btn btn-primary btn-sm">
             + Đặt thêm hoa mới
           </Link>
         </div>
       </div>
 
+      {/* Bộ lọc trạng thái */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
+        {[
+          { id: 'ALL', label: 'Tất cả đơn' },
+          { id: 'IN_PROGRESS', label: 'Đang thực hiện' },
+          { id: 'Completed', label: 'Hoàn tất' },
+          { id: 'Cancelled', label: 'Đã hủy' },
+        ].map((tab) => {
+          const active = statusTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setStatusTab(tab.id)}
+              className={active ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
       {loading ? (
-        <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
-          Đang tải chi tiết các đơn hàng của bạn...
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {[1, 2].map((n) => (
+            <div key={n} className="panel" style={{ padding: 20 }}>
+              <div className="thx-skeleton" style={{ height: 24, width: '40%', marginBottom: 14 }} />
+              <div className="thx-skeleton" style={{ height: 76, width: '100%', marginBottom: 12 }} />
+              <div className="thx-skeleton" style={{ height: 48, width: '60%' }} />
+            </div>
+          ))}
         </div>
-      ) : orders.length === 0 ? (
-        <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
+      ) : visibleOrders.length === 0 ? (
+        <div className="panel" style={{ textAlign: 'center', padding: 52 }}>
+          <ShoppingBag size={40} color="#fecdd3" style={{ marginBottom: 12 }} />
           <p style={{ color: '#6b7280', marginBottom: 18 }}>
-            Bạn chưa có đơn đặt hoa nào.
+            {orders.length === 0
+              ? 'Bạn chưa có đơn đặt hoa nào.'
+              : 'Không có đơn hàng nào thuộc nhóm trạng thái này.'}
           </p>
-          <Link to="/shop" className="btn btn-primary">
+          <Link to="/#catalog" className="btn btn-primary btn-sm">
             Khám phá bộ sưu tập hoa
           </Link>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-          {orders.map((order) => {
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {visibleOrders.map((order) => {
             const meta = orderMetaMap[order.maDonHang] || {};
             const phone =
               order.sdtNguoiNhan || order.soDienThoaiNhan || order.soDienThoai || 'Chưa cập nhật';
@@ -376,7 +409,7 @@ export default function MyOrdersPage() {
             const trackingSteps = isPickup
               ? [
                   { title: '1. Chờ xác nhận', desc: 'Tiệm đã nhận yêu cầu' },
-                  { title: '2. Đang cắm hoa', desc: 'Thợ hoa đang thiết kế' },
+                  { title: '2. Đang cắm hoa', desc: 'Nghệ nhân đang thiết kế' },
                   { title: '3. Sẵn sàng tại tiệm', desc: 'Mời bạn ghé tiệm lấy hoa' },
                   { title: '4. Khách đã nhận hoa', desc: 'Hoàn tất tại cửa hàng' },
                 ]
@@ -401,7 +434,7 @@ export default function MyOrdersPage() {
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <span style={{ fontWeight: 700, fontSize: '1.12rem' }}>
+                    <span className="tabular-nums" style={{ fontWeight: 700, fontSize: '1.12rem' }}>
                       Đơn hàng #{order.maDonHang}
                     </span>
                     <span
@@ -411,7 +444,7 @@ export default function MyOrdersPage() {
                         gap: 5,
                         padding: '4px 10px',
                         borderRadius: 999,
-                        fontSize: '0.8rem',
+                        fontSize: '0.79rem',
                         fontWeight: 600,
                         background: isPickup ? '#f0fdf4' : '#fff1f2',
                         color: isPickup ? '#15803d' : '#be123c',
@@ -424,7 +457,7 @@ export default function MyOrdersPage() {
                         ? `Ship tận nơi (${meta.distanceKm} km)`
                         : 'Ship tận nơi'}
                     </span>
-                    <span style={{ color: '#6b7280', fontSize: '0.86rem' }}>
+                    <span style={{ color: '#6b7280', fontSize: '0.84rem' }}>
                       &bull; Đặt lúc {formatDateTime(order.ngayDat || order.thoiGianDat)}
                     </span>
                   </div>
@@ -436,7 +469,7 @@ export default function MyOrdersPage() {
                         color: stInfo.color,
                         padding: '5px 12px',
                         borderRadius: 999,
-                        fontSize: '0.84rem',
+                        fontSize: '0.82rem',
                         fontWeight: 700,
                       }}
                     >
@@ -457,7 +490,7 @@ export default function MyOrdersPage() {
                       <button
                         type="button"
                         disabled={cancelingId === order.maDonHang}
-                        onClick={() => handleCancelOrder(order.maDonHang)}
+                        onClick={() => setConfirmCancelOrderId(order.maDonHang)}
                         className="btn btn-outline btn-sm"
                         style={{ color: '#e11d48', borderColor: '#fecdd3' }}
                       >
@@ -506,7 +539,7 @@ export default function MyOrdersPage() {
                             style={{
                               fontSize: '0.82rem',
                               fontWeight: done ? 700 : 500,
-                              color: done ? '#111827' : '#6b7280',
+                              color: done ? '#181316' : '#6b7280',
                             }}
                           >
                             {step.title}
@@ -560,23 +593,26 @@ export default function MyOrdersPage() {
                               src={getFlowerImage(mergedItem)}
                               alt={flowerName}
                               style={{
-                                width: 52,
-                                height: 52,
-                                borderRadius: 10,
+                                width: 54,
+                                height: 54,
+                                borderRadius: 11,
                                 objectFit: 'cover',
                                 border: '1px solid #f3f4f6',
                               }}
                             />
                             <div>
-                              <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>
+                              <Link
+                                to={`/product/${item.maSanPham}`}
+                                style={{ fontWeight: 600, fontSize: '0.94rem', color: '#181316' }}
+                              >
                                 {flowerName}
-                              </div>
-                              <div style={{ fontSize: '0.83rem', color: '#6b7280' }}>
+                              </Link>
+                              <div style={{ fontSize: '0.82rem', color: '#6b7280' }}>
                                 Số lượng: <b>{quantity}</b> bó × {formatVND(unitPrice)}
                               </div>
                             </div>
                           </div>
-                          <div style={{ fontWeight: 600, color: '#374151' }}>
+                          <div className="tabular-nums" style={{ fontWeight: 700, color: '#374151' }}>
                             {formatVND(unitPrice * quantity)}
                           </div>
                         </div>
@@ -595,7 +631,7 @@ export default function MyOrdersPage() {
                     alignItems: 'end',
                   }}
                 >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.9rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.88rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <User size={15} color="#e11d48" />
                       <span>
@@ -637,7 +673,7 @@ export default function MyOrdersPage() {
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, color: '#6b7280' }}>
                         <Gift size={15} color="#e11d48" style={{ marginTop: 3, flexShrink: 0 }} />
                         <span>
-                          Ghi chú &amp; lời chúc: <i>"{order.ghiChu}"</i>
+                          Ghi chú &amp; lời chúc: <i>“{order.ghiChu}”</i>
                         </span>
                       </div>
                     )}
@@ -658,7 +694,7 @@ export default function MyOrdersPage() {
                         gap: 6,
                         padding: '5px 12px',
                         borderRadius: 10,
-                        fontSize: '0.84rem',
+                        fontSize: '0.82rem',
                         fontWeight: 600,
                         background: isPaid ? '#dcfce7' : '#fef3c7',
                         color: isPaid ? '#166534' : '#92400e',
@@ -677,7 +713,7 @@ export default function MyOrdersPage() {
                     </div>
 
                     {typeof meta.shippingFee === 'number' && (
-                      <div style={{ fontSize: '0.82rem', color: '#6b7280' }}>
+                      <div style={{ fontSize: '0.81rem', color: '#6b7280' }}>
                         {meta.shippingFee > 0
                           ? `Đã bao gồm phí ship ${meta.distanceKm} km: ${formatVND(meta.shippingFee)}`
                           : 'Miễn phí vận chuyển (Nhận tại tiệm)'}
@@ -686,7 +722,10 @@ export default function MyOrdersPage() {
 
                     <div style={{ fontSize: '0.9rem', color: '#6b7280' }}>
                       Tổng thanh toán:{' '}
-                      <span style={{ fontSize: '1.3rem', fontWeight: 700, color: '#e11d48' }}>
+                      <span
+                        className="tabular-nums"
+                        style={{ fontSize: '1.3rem', fontWeight: 800, color: '#e11d48' }}
+                      >
                         {formatVND(totalMoney)}
                       </span>
                     </div>
@@ -718,7 +757,6 @@ export default function MyOrdersPage() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                cursor: 'pointer',
               }}
             >
               <X size={18} />
@@ -728,7 +766,9 @@ export default function MyOrdersPage() {
             <h2>Quét Mã VietQR Để Thanh Toán</h2>
             <p style={{ color: '#6b7280', fontSize: '0.9rem', margin: '8px 0 16px' }}>
               Đơn hàng <b>#{qrOrder.maDonHang}</b> &bull; Số tiền:{' '}
-              <b style={{ color: '#e11d48' }}>{formatVND(qrOrder.tongTien)}</b>
+              <b className="tabular-nums" style={{ color: '#e11d48' }}>
+                {formatVND(qrOrder.tongTien)}
+              </b>
             </p>
             <img
               src={qrOrder.qrUrl}
@@ -762,6 +802,18 @@ export default function MyOrdersPage() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        open={Boolean(confirmCancelOrderId)}
+        title={`Hủy đơn hàng #${confirmCancelOrderId}?`}
+        message="Bạn có chắc chắn muốn hủy đơn đặt hoa này không? Thao tác này không thể hoàn tác."
+        confirmLabel="Xác nhận hủy đơn"
+        cancelLabel="Giữ lại đơn"
+        variant="danger"
+        loading={Boolean(cancelingId)}
+        onConfirm={executeCancelOrder}
+        onCancel={() => setConfirmCancelOrderId(null)}
+      />
     </div>
   );
 }
