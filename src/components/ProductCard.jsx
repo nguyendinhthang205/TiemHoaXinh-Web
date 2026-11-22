@@ -40,56 +40,23 @@ export default function ProductCard({
             />
           </Link>
 
-          <div
-            style={{
-              position: 'absolute',
-              top: 9,
-              left: 9,
-              display: 'flex',
-              gap: 5,
-              flexWrap: 'wrap',
-              maxWidth: '72%',
-            }}
-          >
+          <div className="thx-prod-top-badges">
             {promoTag && (
               <span
+                className="thx-prod-promo-pill"
                 style={{
                   background: promoTag === 'Bán chạy' ? '#e11d48' : '#15803d',
-                  color: '#ffffff',
-                  padding: '3px 9px',
-                  borderRadius: 999,
-                  fontSize: '0.68rem',
-                  fontWeight: 700,
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
                 }}
               >
                 {promoTag}
               </span>
             )}
-            <span
-              style={{
-                background: 'rgba(255, 255, 255, 0.94)',
-                backdropFilter: 'blur(6px)',
-                color: '#881337',
-                padding: '3px 9px',
-                borderRadius: 999,
-                fontSize: '0.68rem',
-                fontWeight: 700,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-              }}
-            >
+            <span className="thx-prod-tone-pill" title={`Tông ${cleanTone}`}>
               <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: swatchColor,
-                  border: '1px solid rgba(0,0,0,0.14)',
-                }}
+                className="thx-prod-swatch-dot"
+                style={{ background: swatchColor }}
               />
-              {cleanTone}
+              <span className="thx-prod-tone-text">{cleanTone}</span>
             </span>
           </div>
 
@@ -114,7 +81,7 @@ export default function ProductCard({
                 onClick={() => onQuickView(product)}
                 aria-label="Xem nhanh mẫu hoa"
                 title="Xem nhanh"
-                className="thx-prod-circle-btn"
+                className="thx-prod-circle-btn thx-prod-eye-btn"
               >
                 <Eye size={15} />
               </button>
@@ -122,78 +89,31 @@ export default function ProductCard({
           </div>
 
           {typeof similarityScore === 'number' && (
-            <span
-              style={{
-                position: 'absolute',
-                bottom: 9,
-                left: 9,
-                background: 'rgba(22, 101, 52, 0.92)',
-                color: '#ffffff',
-                padding: '3px 9px',
-                borderRadius: 999,
-                fontSize: '0.7rem',
-                fontWeight: 700,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                backdropFilter: 'blur(6px)',
-              }}
-            >
+            <span className="thx-prod-ai-badge">
               <Sparkles size={12} />
-              <span>AI Khớp {Math.round(similarityScore * 100)}%</span>
+              <span>AI {Math.round(similarityScore * 100)}%</span>
             </span>
           )}
         </div>
 
-        <div
-          style={{
-            fontSize: '0.72rem',
-            color: '#9ca3af',
-            fontWeight: 600,
-            marginBottom: 3,
-            textTransform: 'uppercase',
-            letterSpacing: '0.03em',
-          }}
-        >
-          {product.tenDanhMuc || 'Hoa Nghệ Thuật'}
-        </div>
+        <div className="thx-prod-cat">{product.tenDanhMuc || 'Hoa Nghệ Thuật'}</div>
 
         <Link to={`/product/${id}`} className="thx-prod-title">
           {product.tenSanPham}
         </Link>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 6,
-            marginBottom: 10,
-            fontSize: '0.75rem',
-          }}
-        >
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 3,
-              color: '#d97706',
-              fontWeight: 700,
-            }}
-          >
+        <div className="thx-prod-meta-row">
+          <span className="thx-prod-rating">
             <Star size={13} fill="#f59e0b" color="#f59e0b" />
             <span>{ratingStats.avg}</span>
             {ratingStats.count > 0 && (
-              <span style={{ color: '#9ca3af', fontWeight: 500 }}>({ratingStats.count})</span>
+              <span className="thx-prod-rev-count">({ratingStats.count})</span>
             )}
           </span>
 
           <span
+            className="thx-prod-stock-pill"
             style={{
-              padding: '2px 8px',
-              borderRadius: 999,
-              fontWeight: 600,
-              fontSize: '0.71rem',
               background: isOutOfStock
                 ? '#f3f4f6'
                 : isLowStock
@@ -202,51 +122,41 @@ export default function ProductCard({
               color: isOutOfStock ? '#6b7280' : isLowStock ? '#92400e' : '#166534',
             }}
           >
-            {isOutOfStock
-              ? 'Hết hàng'
-              : isLowStock
-              ? `Còn ${stock} bó`
-              : `Sẵn ${stock} bó`}
+            {isOutOfStock ? (
+              'Hết'
+            ) : (
+              <>
+                <span className="thx-prod-stock-prefix">
+                  {isLowStock ? 'Còn ' : 'Sẵn '}
+                </span>
+                {stock} bó
+              </>
+            )}
           </span>
         </div>
       </div>
 
-      <div
-        className="thx-prod-footer"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          paddingTop: 10,
-          borderTop: '1px solid #f5edf0',
-          gap: 8,
-        }}
-      >
-        <span
-          className="tabular-nums"
-          style={{ fontWeight: 800, color: '#181316', fontSize: '1.01rem' }}
-        >
-          {formatVND(product.giaBan)}
-        </span>
+      <div className="thx-prod-footer">
+        <span className="tabular-nums thx-prod-price">{formatVND(product.giaBan)}</span>
 
         {showAdminTools ? (
           <Link
             to={`/admin?editProduct=${id}`}
-            className="btn btn-outline btn-sm"
+            className="btn btn-outline btn-sm thx-prod-add-btn"
             style={{ borderColor: '#fecdd3', color: '#be123c' }}
           >
             <Settings size={14} />
-            <span>Sửa mẫu</span>
+            <span>Sửa</span>
           </Link>
         ) : (
           <button
             type="button"
             onClick={() => addToCart?.(id, 1)}
-            className="btn btn-primary btn-sm"
+            className="btn btn-primary btn-sm thx-prod-add-btn"
             disabled={isOutOfStock}
           >
             <ShoppingCart size={14} />
-            <span>{isOutOfStock ? 'Hết hàng' : 'Thêm'}</span>
+            <span>{isOutOfStock ? 'Hết' : 'Thêm'}</span>
           </button>
         )}
       </div>

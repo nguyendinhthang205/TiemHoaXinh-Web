@@ -43,7 +43,7 @@ export default function SmartAiConcierge({ products = [] }) {
     <section id="ai-concierge" className="container" style={{ scrollMarginTop: 120 }}>
       <div className="thx-ai-studio">
         <div className="thx-ai-studio-grid">
-          <div>
+          <div style={{ minWidth: 0, width: '100%' }}>
             <div
               style={{
                 display: 'inline-flex',
@@ -218,12 +218,14 @@ export default function SmartAiConcierge({ products = [] }) {
           </div>
 
           {/* Kết quả AI Matching */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 11, minWidth: 0, width: '100%' }}>
             <div
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '4px 10px',
                 fontSize: '0.82rem',
                 color: 'rgba(255, 255, 255, 0.85)',
                 marginBottom: 2,
@@ -260,13 +262,7 @@ export default function SmartAiConcierge({ products = [] }) {
                     <img
                       src={getFlowerImage(product)}
                       alt={product.tenSanPham}
-                      style={{
-                        width: 78,
-                        height: 78,
-                        borderRadius: 12,
-                        objectFit: 'cover',
-                        border: '1px solid rgba(255,255,255,0.2)',
-                      }}
+                      className="thx-ai-match-img"
                     />
                   </Link>
 
@@ -276,7 +272,8 @@ export default function SmartAiConcierge({ products = [] }) {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        gap: 8,
+                        flexWrap: 'wrap',
+                        gap: 6,
                         marginBottom: 3,
                       }}
                     >
@@ -297,7 +294,7 @@ export default function SmartAiConcierge({ products = [] }) {
                         style={{
                           fontWeight: 800,
                           color: '#fecdd3',
-                          fontSize: '0.92rem',
+                          fontSize: '0.9rem',
                         }}
                       >
                         {formatVND(product.giaBan)}
@@ -306,15 +303,7 @@ export default function SmartAiConcierge({ products = [] }) {
 
                     <Link
                       to={`/product/${product.maSanPham}`}
-                      style={{
-                        fontWeight: 700,
-                        color: '#ffffff',
-                        fontSize: '0.94rem',
-                        display: 'block',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
+                      className="thx-ai-match-title"
                     >
                       {product.tenSanPham}
                     </Link>
@@ -324,12 +313,13 @@ export default function SmartAiConcierge({ products = [] }) {
                         fontSize: '0.76rem',
                         color: 'rgba(255,255,255,0.74)',
                         margin: '2px 0 8px',
+                        lineHeight: 1.4,
                       }}
                     >
                       {reason}
                     </div>
 
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <button
                         type="button"
                         onClick={() => addToCart?.(product.maSanPham, 1)}

@@ -35,6 +35,8 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
+  max-width: 100%;
 }
 
 body {
@@ -45,6 +47,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  max-width: 100%;
 }
 
 h1, h2, .serif-title {
@@ -737,11 +740,14 @@ input, select, textarea {
   margin-top: 28px;
   box-shadow: 0 24px 48px -14px rgba(49, 18, 32, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.1);
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .thx-ai-studio-grid {
   display: grid;
-  grid-template-columns: 1.05fr 1.25fr;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.25fr);
   gap: 24px;
   align-items: start;
 }
@@ -757,6 +763,8 @@ input, select, textarea {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
+  text-align: left;
 }
 
 .thx-ai-chip:hover {
@@ -779,7 +787,30 @@ input, select, textarea {
   display: flex;
   gap: 12px;
   align-items: center;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
   transition: all var(--transition-fast);
+}
+
+.thx-ai-match-img {
+  width: 78px;
+  height: 78px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: block;
+}
+
+.thx-ai-match-title {
+  font-weight: 700;
+  color: #ffffff;
+  font-size: 0.94rem;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .thx-ai-match-card:hover {
@@ -829,6 +860,7 @@ input, select, textarea {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  min-width: 0;
   box-shadow: var(--card-shadow);
   transition: transform var(--transition-smooth), box-shadow var(--transition-smooth), border-color var(--transition-fast);
 }
@@ -859,6 +891,46 @@ input, select, textarea {
   transform: scale(1.06);
 }
 
+.thx-prod-top-badges {
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  max-width: 72%;
+}
+
+.thx-prod-promo-pill {
+  color: #ffffff;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+.thx-prod-tone-pill {
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(6px);
+  color: #881337;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.thx-prod-swatch-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  flex-shrink: 0;
+}
+
 .thx-prod-quick-actions {
   position: absolute;
   top: 9px;
@@ -887,6 +959,31 @@ input, select, textarea {
   transform: scale(1.06);
 }
 
+.thx-prod-ai-badge {
+  position: absolute;
+  bottom: 9px;
+  left: 9px;
+  background: rgba(22, 101, 52, 0.92);
+  color: #ffffff;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  backdrop-filter: blur(6px);
+}
+
+.thx-prod-cat {
+  font-size: 0.72rem;
+  color: #9ca3af;
+  font-weight: 600;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
 .thx-prod-title {
   color: var(--obsidian);
   font-weight: 700;
@@ -902,6 +999,51 @@ input, select, textarea {
 
 .thx-prod-title:hover {
   color: var(--primary);
+}
+
+.thx-prod-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 0.75rem;
+}
+
+.thx-prod-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #d97706;
+  font-weight: 700;
+}
+
+.thx-prod-rev-count {
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.thx-prod-stock-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.71rem;
+  white-space: nowrap;
+}
+
+.thx-prod-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid #f5edf0;
+  gap: 8px;
+}
+
+.thx-prod-price {
+  font-weight: 800;
+  color: #181316;
+  font-size: 1.01rem;
 }
 
 /* =========================================================================
@@ -1225,7 +1367,7 @@ input, select, textarea {
     grid-template-columns: repeat(2, 1fr);
   }
   .thx-ai-studio-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .thx-filter-controls-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -1254,7 +1396,7 @@ input, select, textarea {
 
 @media (max-width: 768px) {
   .container {
-    padding: 0 14px;
+    padding: 0 10px;
   }
   .panel {
     padding: 16px;
@@ -1326,8 +1468,25 @@ input, select, textarea {
     grid-template-columns: 1fr;
   }
   .thx-ai-studio {
-    padding: 18px 16px;
-    border-radius: 20px;
+    padding: 16px 14px;
+    border-radius: 18px;
+  }
+  .thx-ai-chip {
+    font-size: 0.73rem;
+    padding: 6px 10px;
+  }
+  .thx-ai-match-card {
+    padding: 10px;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .thx-ai-match-img {
+    width: 62px;
+    height: 62px;
+    border-radius: 10px;
+  }
+  .thx-ai-match-title {
+    font-size: 0.86rem;
   }
   .thx-occasion-pills {
     flex-wrap: nowrap;
@@ -1339,22 +1498,115 @@ input, select, textarea {
   }
   .thx-product-grid,
   .product-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
   }
   .thx-prod-card {
-    padding: 10px;
-    border-radius: 16px;
+    padding: 5px;
+    border-radius: 11px;
+  }
+  .thx-prod-img-wrap {
+    aspect-ratio: 1 / 1;
+    border-radius: 8px;
+    margin-bottom: 5px;
+  }
+  .thx-prod-top-badges {
+    top: 4px;
+    left: 4px;
+    gap: 3px;
+  }
+  .thx-prod-promo-pill {
+    font-size: 0.52rem;
+    padding: 1px 4px;
+  }
+  .thx-prod-tone-pill {
+    padding: 3px;
+    border-radius: 50%;
+  }
+  .thx-prod-tone-text {
+    display: none;
+  }
+  .thx-prod-swatch-dot {
+    width: 7px;
+    height: 7px;
+  }
+  .thx-prod-quick-actions {
+    top: 4px;
+    right: 4px;
+  }
+  .thx-prod-eye-btn {
+    display: none;
+  }
+  .thx-prod-circle-btn {
+    width: 22px;
+    height: 22px;
+  }
+  .thx-prod-circle-btn svg {
+    width: 11px;
+    height: 11px;
+  }
+  .thx-prod-ai-badge {
+    bottom: 4px;
+    left: 4px;
+    font-size: 0.52rem;
+    padding: 1px 5px;
+    gap: 2px;
+  }
+  .thx-prod-ai-badge svg {
+    width: 9px;
+    height: 9px;
+  }
+  .thx-prod-cat {
+    display: none;
+  }
+  .thx-prod-title {
+    font-size: 0.66rem;
+    line-height: 1.24;
+    min-height: 2.48em;
+    margin-bottom: 3px;
+    word-break: break-word;
+  }
+  .thx-prod-meta-row {
+    font-size: 0.58rem;
+    gap: 2px;
+    margin-bottom: 4px;
+  }
+  .thx-prod-rating svg {
+    width: 10px;
+    height: 10px;
+  }
+  .thx-prod-rev-count,
+  .thx-prod-stock-prefix {
+    display: none;
+  }
+  .thx-prod-stock-pill {
+    font-size: 0.54rem;
+    padding: 1px 4px;
   }
   .thx-prod-footer {
     flex-direction: column;
-    align-items: stretch !important;
-    gap: 8px;
+    align-items: stretch;
+    padding-top: 5px;
+    gap: 4px;
   }
-  .thx-prod-footer > button,
-  .thx-prod-footer > a {
+  .thx-prod-price {
+    font-size: 0.66rem;
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .thx-prod-add-btn {
     width: 100%;
     justify-content: center;
+    padding: 4px 4px;
+    font-size: 0.63rem;
+    border-radius: 7px;
+    gap: 3px;
+  }
+  .thx-prod-add-btn svg {
+    width: 11px;
+    height: 11px;
   }
   .thx-detail-card {
     grid-template-columns: 1fr;
