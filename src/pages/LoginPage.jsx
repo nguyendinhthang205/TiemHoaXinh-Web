@@ -207,7 +207,7 @@ export default function LoginPage() {
         </div>
 
         {/* Cột phải: Form Đăng nhập / Đăng ký */}
-        <div style={{ padding: '34px 32px' }}>
+        <div className="thx-login-form-pane">
           <div style={{ textAlign: 'center', marginBottom: 22 }}>
             <h1 style={{ fontSize: '1.7rem', marginBottom: 6 }}>
               {mode === 'login' ? 'Đăng Nhập Hệ Thống' : 'Tạo Tài Khoản Mới'}
@@ -414,7 +414,7 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="thx-two-col">
                 <div className="form-group">
                   <label className="form-label">Email đăng nhập</label>
                   <div style={{ position: 'relative' }}>
@@ -478,7 +478,7 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="thx-two-col">
                 <div className="form-group">
                   <label className="form-label">Mật khẩu</label>
                   <div style={{ position: 'relative' }}>

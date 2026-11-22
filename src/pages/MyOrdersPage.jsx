@@ -622,15 +622,7 @@ export default function MyOrdersPage() {
                 )}
 
                 {/* Thông tin giao hàng, lời chúc & trạng thái thanh toán */}
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-                    gap: 16,
-                    paddingTop: 14,
-                    alignItems: 'end',
-                  }}
-                >
+                <div className="thx-order-footer-grid">
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.88rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <User size={15} color="#e11d48" />
@@ -679,14 +671,7 @@ export default function MyOrdersPage() {
                     )}
                   </div>
 
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'flex-end',
-                      gap: 8,
-                    }}
-                  >
+                  <div className="thx-order-pay-col">
                     <div
                       style={{
                         display: 'inline-flex',

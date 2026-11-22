@@ -801,13 +801,7 @@ export default function ProductDetailPage() {
           Đánh Giá Từ Khách Hàng ({reviews.length})
         </h2>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-            gap: 22,
-          }}
-        >
+        <div className="thx-detail-reviews-grid">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="panel" style={{ padding: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14 }}>

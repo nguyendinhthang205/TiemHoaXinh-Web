@@ -115,7 +115,7 @@ export default function AdminOrdersTab({
               </button>
             )}
 
-            <div style={{ position: 'relative' }}>
+            <div style={{ position: 'relative', flex: '1 1 200px' }}>
               <Search
                 size={15}
                 color="#9ca3af"
@@ -123,19 +123,19 @@ export default function AdminOrdersTab({
               />
               <input
                 type="text"
-                className="form-control"
+                className="form-control thx-admin-filter-input"
                 placeholder="Tìm mã đơn, tên khách, SĐT..."
                 value={orderSearch}
                 onChange={(e) => setOrderSearch(e.target.value)}
-                style={{ paddingLeft: 34, height: 38, fontSize: '0.86rem', width: 240 }}
+                style={{ paddingLeft: 34, height: 38, fontSize: '0.86rem' }}
               />
             </div>
 
             <select
-              className="form-control"
+              className="form-control thx-admin-filter-select"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              style={{ height: 38, fontSize: '0.86rem', width: 215 }}
+              style={{ height: 38, fontSize: '0.86rem' }}
             >
               <option value="ALL">Tất cả trạng thái ({activeOrders.length})</option>
               <option value="IN_PROGRESS">Đang xử lý ({inProgressCount})</option>

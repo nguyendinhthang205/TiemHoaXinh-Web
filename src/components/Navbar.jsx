@@ -159,31 +159,22 @@ export default function Navbar() {
   if (isAdminRoute) {
     return (
       <header className="thx-navbar-shell">
-        <div
-          className="container"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            height: 52,
-            gap: 12,
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div className="container thx-admin-nav-bar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <Link
               to="/"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 7,
+                gap: 6,
                 color: '#181316',
                 fontWeight: 600,
-                fontSize: '0.84rem',
+                fontSize: '0.82rem',
+                whiteSpace: 'nowrap',
               }}
             >
               <Store size={15} />
-              <span>Xem trang cửa hàng</span>
+              <span>Cửa hàng</span>
             </Link>
 
             <span style={{ color: '#e5e7eb' }}>|</span>
@@ -193,20 +184,21 @@ export default function Navbar() {
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 7,
+                gap: 6,
                 color: '#e11d48',
                 fontWeight: 700,
-                fontSize: '0.84rem',
+                fontSize: '0.82rem',
                 borderBottom: '2px solid #e11d48',
                 paddingBottom: 2,
+                whiteSpace: 'nowrap',
               }}
             >
               <LayoutDashboard size={15} />
-              <span>Trung tâm Quản trị &amp; AI Dự báo</span>
+              <span>Quản trị &amp; AI</span>
             </Link>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: '0.84rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: '0.82rem' }}>
             <span
               style={{
                 display: 'inline-flex',
@@ -217,14 +209,14 @@ export default function Navbar() {
               }}
             >
               <ShieldCheck size={15} color="#e11d48" />
-              <span>{user?.hoTen || 'Quản trị viên'}</span>
+              <span>{user?.hoTen || 'Admin'}</span>
             </span>
 
             <button
               type="button"
               onClick={handleLogout}
               className="thx-util-item"
-              style={{ fontSize: '0.84rem' }}
+              style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}
             >
               <LogOut size={14} />
               <span>Đăng xuất</span>
@@ -471,7 +463,16 @@ export default function Navbar() {
 
         {/* 4. Thanh Header gọn trên điện thoại */}
         <div className="container thx-mobile-header-bar">
-          <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Link
+            to="/"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              minWidth: 0,
+              flex: 1,
+            }}
+          >
             <div
               style={{
                 width: 34,
@@ -482,23 +483,30 @@ export default function Navbar() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                flexShrink: 0,
               }}
             >
               <Flower2 size={18} />
             </div>
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div
                 className="serif-title"
                 style={{
                   fontWeight: 700,
-                  fontSize: '1.05rem',
+                  fontSize: '1.02rem',
                   color: '#be123c',
                   lineHeight: 1.1,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
                 }}
               >
                 Tiệm Hoa Xinh
               </div>
-              <div style={{ fontSize: '0.66rem', color: '#6b7280' }}>
+              <div
+                className="thx-mobile-brand-sub"
+                style={{ fontSize: '0.66rem', color: '#6b7280', whiteSpace: 'nowrap' }}
+              >
                 Fresh Floral &amp; Smart AI
               </div>
             </div>

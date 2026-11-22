@@ -561,14 +561,7 @@ export default function CartPage() {
           </div>
         </div>
       ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))',
-            gap: 24,
-            alignItems: 'start',
-          }}
-        >
+        <div className="thx-cart-layout">
           {/* Cột 1: Danh sách sản phẩm + Voucher + Tóm tắt tiền */}
           <div className="panel">
             <div
@@ -596,31 +589,22 @@ export default function CartPage() {
               const stock = stockMap[item.maSanPham];
               const overStock = typeof stock === 'number' && item.soLuong > stock;
               return (
-                <div
-                  key={item.maSanPham}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 13,
-                    padding: '13px 0',
-                    borderBottom: '1px solid #f3f4f6',
-                  }}
-                >
+                <div key={item.maSanPham} className="thx-cart-item-row">
                   <img
                     src={getFlowerImage(item)}
                     alt={item.tenSanPham}
-                    style={{ width: 68, height: 68, borderRadius: 12, objectFit: 'cover' }}
+                    style={{ width: 66, height: 66, borderRadius: 12, objectFit: 'cover', flexShrink: 0 }}
                   />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <Link
                       to={`/product/${item.maSanPham}`}
-                      style={{ fontWeight: 700, color: '#181316', display: 'block' }}
+                      style={{ fontWeight: 700, color: '#181316', display: 'block', lineHeight: 1.35 }}
                     >
                       {item.tenSanPham}
                     </Link>
                     <div
                       className="tabular-nums"
-                      style={{ color: '#e11d48', fontWeight: 700, fontSize: '0.9rem' }}
+                      style={{ color: '#e11d48', fontWeight: 700, fontSize: '0.9rem', marginTop: 2 }}
                     >
                       {formatVND(item.giaBan || item.donGia)}
                     </div>
@@ -651,34 +635,36 @@ export default function CartPage() {
                       </div>
                     )}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div className="thx-cart-item-actions">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={() => updateQuantity(item, item.soLuong - 1)}
+                        className="btn btn-outline btn-sm"
+                      >
+                        -
+                      </button>
+                      <span className="tabular-nums" style={{ minWidth: 24, textAlign: 'center', fontWeight: 700 }}>
+                        {item.soLuong}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => updateQuantity(item, item.soLuong + 1)}
+                        className="btn btn-outline btn-sm"
+                      >
+                        +
+                      </button>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => updateQuantity(item, item.soLuong - 1)}
-                      className="btn btn-outline btn-sm"
+                      onClick={() => removeItem(item)}
+                      style={{ background: 'transparent', color: '#ef4444', padding: 6 }}
+                      title="Xóa khỏi giỏ"
+                      aria-label="Xóa khỏi giỏ"
                     >
-                      -
-                    </button>
-                    <span className="tabular-nums" style={{ minWidth: 24, textAlign: 'center', fontWeight: 700 }}>
-                      {item.soLuong}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => updateQuantity(item, item.soLuong + 1)}
-                      className="btn btn-outline btn-sm"
-                    >
-                      +
+                      <Trash2 size={17} />
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => removeItem(item)}
-                    style={{ background: 'transparent', color: '#ef4444', padding: 6 }}
-                    title="Xóa khỏi giỏ"
-                    aria-label="Xóa khỏi giỏ"
-                  >
-                    <Trash2 size={17} />
-                  </button>
                 </div>
               );
             })}
@@ -935,7 +921,7 @@ export default function CartPage() {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="thx-two-col">
                 <div className="form-group">
                   <label className="form-label">Tên người nhận hoa</label>
                   <input
@@ -1024,7 +1010,7 @@ export default function CartPage() {
                 </div>
               )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="thx-two-col">
                 <div className="form-group">
                   <label className="form-label">
                     {deliveryMethod === 'ship' ? 'Ngày giao hoa' : 'Ngày tới lấy hoa'}

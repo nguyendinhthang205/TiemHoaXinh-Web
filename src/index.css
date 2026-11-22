@@ -989,6 +989,78 @@ input, select, textarea {
   position: relative;
 }
 
+.thx-login-form-pane {
+  padding: 34px 32px;
+}
+
+.thx-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.thx-cart-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.thx-cart-item-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.thx-cart-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.thx-detail-reviews-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.thx-order-footer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 16px;
+  padding-top: 14px;
+  align-items: end;
+}
+
+.thx-order-pay-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.thx-admin-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 8px 0;
+  gap: 10px 14px;
+  flex-wrap: wrap;
+}
+
+.thx-admin-filter-input {
+  width: 240px;
+}
+
+.thx-admin-filter-select {
+  width: 215px;
+}
+
 /* =========================================================================
    CHAT WIDGET & HOTLINE
    ========================================================================= */
@@ -1160,9 +1232,20 @@ input, select, textarea {
   }
   .thx-login-shell {
     grid-template-columns: 1fr;
+    max-width: 520px;
   }
   .thx-login-visual {
     display: none;
+  }
+  .thx-cart-layout,
+  .thx-detail-reviews-grid,
+  .thx-order-footer-grid {
+    grid-template-columns: 1fr;
+  }
+  .thx-order-pay-col {
+    align-items: flex-start;
+    padding-top: 10px;
+    border-top: 1px dashed #f3f4f6;
   }
   .thx-footer-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -1170,6 +1253,57 @@ input, select, textarea {
 }
 
 @media (max-width: 768px) {
+  .container {
+    padding: 0 14px;
+  }
+  .panel {
+    padding: 16px;
+    border-radius: 16px;
+  }
+  .thx-login-form-pane {
+    padding: 24px 18px;
+  }
+  .thx-two-col {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .thx-cart-item-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .thx-cart-item-actions {
+    width: 100%;
+    justify-content: space-between;
+    padding-left: 80px;
+  }
+  .thx-filter-controls-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .thx-filter-controls-grid > :first-child {
+    grid-column: 1 / -1;
+  }
+  .thx-admin-shell {
+    padding: 14px 12px 48px;
+  }
+  .thx-admin-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 6px;
+  }
+  .thx-admin-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .thx-admin-tabs > button {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .thx-admin-filter-input,
+  .thx-admin-filter-select {
+    width: 100% !important;
+  }
   .thx-hero-section {
     padding: 20px 0 26px;
   }
@@ -1286,6 +1420,18 @@ input, select, textarea {
     left: 12px;
     bottom: 14px;
     max-width: calc(100vw - 84px);
+  }
+}
+
+@media (max-width: 480px) {
+  .thx-filter-controls-grid {
+    grid-template-columns: 1fr;
+  }
+  .thx-cart-item-actions {
+    padding-left: 0;
+  }
+  .thx-mobile-brand-sub {
+    display: none;
   }
 }
 

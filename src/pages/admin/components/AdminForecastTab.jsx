@@ -124,7 +124,7 @@ export default function AdminForecastTab({
           </button>
         </div>
 
-        <div style={{ position: 'relative' }}>
+        <div style={{ position: 'relative', flex: '1 1 200px' }}>
           <Search
             size={15}
             color="#9ca3af"
@@ -132,11 +132,11 @@ export default function AdminForecastTab({
           />
           <input
             type="text"
-            className="form-control"
+            className="form-control thx-admin-filter-input"
             placeholder="Tìm mẫu hoa cần dự báo..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={{ paddingLeft: 34, height: 36, fontSize: '0.85rem', width: 220 }}
+            style={{ paddingLeft: 34, height: 36, fontSize: '0.85rem' }}
           />
         </div>
       </div>

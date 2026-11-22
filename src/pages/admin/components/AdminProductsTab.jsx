@@ -77,7 +77,7 @@ export default function AdminProductsTab({
               </button>
             </div>
 
-            <div style={{ position: 'relative' }}>
+            <div style={{ position: 'relative', flex: '1 1 200px' }}>
               <Search
                 size={15}
                 color="#9ca3af"
@@ -85,11 +85,11 @@ export default function AdminProductsTab({
               />
               <input
                 type="text"
-                className="form-control"
+                className="form-control thx-admin-filter-input"
                 placeholder="Tìm tên hoa, tông màu..."
                 value={productSearch}
                 onChange={(e) => setProductSearch(e.target.value)}
-                style={{ paddingLeft: 34, height: 36, fontSize: '0.86rem', width: 220 }}
+                style={{ paddingLeft: 34, height: 36, fontSize: '0.86rem' }}
               />
             </div>
 
@@ -434,7 +434,7 @@ export default function AdminProductsTab({
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="thx-two-col">
                 <div className="form-group">
                   <label className="form-label">Giá bán (VNĐ)</label>
                   <input
