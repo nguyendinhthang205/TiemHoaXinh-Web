@@ -238,19 +238,11 @@ export default function MyOrdersPage() {
     }
   };
 
-  const openQrForOrder = async (order, amountToPay) => {
-    const orderId = order.maDonHang;
-    let qrUrl = `https://img.vietqr.io/image/MB-0905111222-compact2.png?amount=${amountToPay}&addInfo=TIEMHOAXINH%20DH${orderId}`;
-    try {
-      const qrRes = await api.get(`/ThanhToan/vietqr/${orderId}`);
-      if (qrRes.data?.qrUrl) qrUrl = qrRes.data.qrUrl;
-    } catch {
-      // Giữ link VietQR mặc định
-    }
+  const openQrForOrder = (order, amountToPay) => {
     setQrOrder({
-      maDonHang: orderId,
+      maDonHang: order.maDonHang,
       tongTien: amountToPay,
-      qrUrl,
+      qrUrl: '/images/vietqr-vietinbank.jpg',
     });
   };
 
@@ -757,13 +749,16 @@ export default function MyOrdersPage() {
             </p>
             <img
               src={qrOrder.qrUrl}
-              alt="VietQR Payment"
+              alt="VietQR VietinBank - NGUYEN DINH THANG - 105880014341"
               style={{
-                width: 260,
-                height: 260,
+                width: '100%',
+                maxWidth: 290,
+                height: 'auto',
                 borderRadius: 16,
                 border: '1px solid var(--border)',
                 marginBottom: 18,
+                display: 'block',
+                marginInline: 'auto',
               }}
             />
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
