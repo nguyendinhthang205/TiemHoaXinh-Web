@@ -85,6 +85,14 @@ const CURATED_COLLECTIONS = [
     accentBg: '#dcfce7',
     accentColor: '#15803d',
   },
+  {
+    id: 'tang-le',
+    title: 'Hoa Tang Lễ',
+    desc: 'Kệ viếng & giỏ chia buồn trang nghiêm',
+    icon: Flower2,
+    accentBg: '#f1f5f9',
+    accentColor: '#334155',
+  },
 ];
 
 export default function HomePage() {
@@ -377,7 +385,7 @@ export default function HomePage() {
             </h1>
 
             <p className="thx-hero-desc">
-              Những thiết kế hoa bó, giỏ hoa và kệ khai trương được nghệ nhân cắm mới mỗi sáng tại Đà Nẵng, gửi trọn lời chúc tinh tế đến người thương trong mọi dịp đặc biệt.
+              Những thiết kế hoa bó, giỏ hoa, kệ khai trương và hoa chia buồn được nghệ nhân cắm mới mỗi sáng tại Đà Nẵng, gửi trọn tấm lòng tinh tế trong mọi dịp chúc mừng, tri ân và chia buồn trang trọng.
             </p>
 
             <div className="thx-hero-actions">

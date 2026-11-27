@@ -13,6 +13,7 @@ import { formatVietnamPhone, isAdminAccount } from '../utils/storeUtils';
 
 const CUSTOMER_QUICK_PROMPTS = [
   'Tư vấn mẫu hoa sinh nhật đẹp',
+  'Tư vấn kệ hoa chia buồn giao nhanh',
   'Hỏi phí ship & giao nhanh 2H',
   'Kiểm tra trạng thái đơn hàng',
 ];

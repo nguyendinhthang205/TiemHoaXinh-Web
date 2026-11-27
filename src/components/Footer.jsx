@@ -72,7 +72,7 @@ export default function Footer() {
           </div>
 
           <p style={{ fontSize: '0.85rem', lineHeight: 1.65, marginBottom: 14, color: '#4b5563' }}>
-            Chuyên thiết kế hoa bó nghệ thuật, giỏ hoa chúc mừng và kệ hoa khai trương từ nguồn hoa tươi tuyển chọn mỗi sáng tại Đà Nẵng.
+            Chuyên thiết kế hoa bó nghệ thuật, giỏ hoa chúc mừng, kệ hoa khai trương và hoa chia buồn tang lễ từ nguồn hoa tươi tuyển chọn mỗi sáng tại Đà Nẵng.
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.84rem' }}>
@@ -155,6 +155,9 @@ export default function Footer() {
             </Link>
             <Link to="/?cat=chu-de#catalog" style={{ color: '#4b5563' }}>
               Hoa Tình Yêu &amp; Tri Ân
+            </Link>
+            <Link to="/?cat=tang-le#catalog" style={{ color: '#4b5563' }}>
+              Hoa Tang Lễ &amp; Chia Buồn
             </Link>
           </div>
         </div>

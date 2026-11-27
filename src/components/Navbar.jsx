@@ -68,6 +68,16 @@ export const STORE_CATEGORY_MENU = [
     ],
   },
   {
+    id: 'tang-le',
+    label: 'HOA TANG LỄ',
+    subItems: [
+      { label: 'KỆ HOA TANG LỄ TRANG NGHIÊM', query: 'kệ hoa' },
+      { label: 'VÒNG & KỆ HOA TÔNG TRẮNG', query: 'trắng' },
+      { label: 'LAN TÍM & HOA VIẾNG TƯỞNG NHỚ', query: 'tím' },
+      { label: 'GIỎ HOA CHIA BUỒN THÀNH TÂM', query: 'giỏ hoa' },
+    ],
+  },
+  {
     id: 'thiet-ke',
     label: 'THIẾT KẾ',
     subItems: [
@@ -76,6 +86,7 @@ export const STORE_CATEGORY_MENU = [
       { label: 'LẴNG HOA KHAI TRƯƠNG', dm: '3' },
       { label: 'HỘP HOA CAO CẤP', dm: '4' },
       { label: 'HOA CƯỚI CẦM TAY', dm: '5' },
+      { label: 'HOA TANG LỄ', dm: '6' },
     ],
   },
 ];

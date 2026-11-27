@@ -109,17 +109,23 @@ export const CATEGORY_RULES = {
     keywords: ['tình yêu', 'tri ân', 'cưới', 'chúc mừng', 'kỷ niệm', 'hồng'],
     categories: [1, 2, 4, 5],
   },
+  'tang-le': {
+    title: 'Hoa Tang Lễ & Chia Buồn',
+    subtitle: 'Kệ hoa viếng và giỏ hoa chia buồn trang nghiêm, thành kính phân ưu',
+    keywords: ['tang lễ', 'chia buồn', 'viếng', 'thành kính', 'tưởng nhớ'],
+    categories: [6],
+  },
   thietKe: {
     title: 'Thiết Kế Hoa Tươi',
     subtitle: 'Tuyển tập đầy đủ các kiểu dáng hoa nghệ thuật tại Tiệm Hoa Xinh',
     keywords: [],
-    categories: [1, 2, 3, 4, 5],
+    categories: [1, 2, 3, 4, 5, 6],
   },
   'thiet-ke': {
     title: 'Thiết Kế Hoa Tươi',
     subtitle: 'Tuyển tập đầy đủ các kiểu dáng hoa nghệ thuật tại Tiệm Hoa Xinh',
     keywords: [],
-    categories: [1, 2, 3, 4, 5],
+    categories: [1, 2, 3, 4, 5, 6],
   },
 };
 
@@ -129,6 +135,7 @@ export const OCCASION_OPTIONS = [
   { id: 'khai-truong', label: 'Khai trương' },
   { id: 'lan-ho-diep', label: 'Lan Hồ Điệp' },
   { id: 'chu-de', label: 'Tình yêu & Tri ân' },
+  { id: 'tang-le', label: 'Tang lễ' },
 ];
 
 export const BUDGET_OPTIONS = [
@@ -144,6 +151,7 @@ export const AI_CONCIERGE_OCCASIONS = [
   { id: 'khai-truong', label: 'Khai trương / Chúc mừng', keywords: ['khai trương', 'kệ', 'lẵng', 'hồng phát', 'vàng', 'lan', 'thiên điểu', 'đồng tiền'] },
   { id: 'tri-an', label: 'Tri ân / Tặng Mẹ', keywords: ['giỏ hoa', 'lan', 'hộp', 'tri ân', 'tặng mẹ', 'cẩm chướng', 'thược dược', 'sen', 'cẩm tú cầu', 'cát tường'] },
   { id: 'cuoi', label: 'Hoa Cưới / Cầm tay', keywords: ['cưới', 'cô dâu', 'linh lan', 'calla lily', 'loa kèn', 'trắng', 'tulip', 'baby'] },
+  { id: 'tang-le', label: 'Tang lễ / Chia buồn', keywords: ['tang lễ', 'chia buồn', 'viếng', 'thành kính', 'tưởng nhớ', 'cúc trắng', 'vòng hoa'] },
 ];
 
 export const AI_CONCIERGE_RECIPIENTS = [
@@ -151,6 +159,7 @@ export const AI_CONCIERGE_RECIPIENTS = [
   { id: 'mom', label: 'Mẹ / Gia đình', preferredTones: ['Cam Đào', 'Hồng Pastel', 'Tím', 'Xanh Dương'], preferredCats: [2, 4, 1] },
   { id: 'partner', label: 'Sếp / Đối tác', preferredTones: ['Vàng', 'Đỏ', 'Trắng', 'Tím'], preferredCats: [2, 3] },
   { id: 'friend', label: 'Bạn bè / Đồng nghiệp', preferredTones: ['Vàng', 'Cam Đào', 'Hồng Pastel', 'Xanh Dương'], preferredCats: [1, 2] },
+  { id: 'condolence', label: 'Gia quyến / Kính viếng', preferredTones: ['Trắng', 'Tím', 'Vàng'], preferredCats: [6, 3, 2] },
 ];
 
 export function matchesBudget(price, budgetId) {
@@ -159,6 +168,20 @@ export function matchesBudget(price, budgetId) {
   if (budgetId === '400-700') return num >= 400000 && num <= 700000;
   if (budgetId === 'over-700') return num > 700000;
   return true;
+}
+
+export function isCondolenceProduct(item) {
+  if (!item) return false;
+  const cat = Number(item.maDanhMuc || 0);
+  const tags = Array.isArray(item.danhMucTrangChu) ? item.danhMucTrangChu : [];
+  const txt = `${item.tenSanPham || ''} ${item.moTa || ''} ${item.tenDanhMuc || ''}`.toLowerCase();
+  return (
+    cat === 6 ||
+    tags.includes('tang-le') ||
+    txt.includes('tang lễ') ||
+    txt.includes('chia buồn') ||
+    txt.includes('viếng')
+  );
 }
 
 export function computeSmartAiMatches({
@@ -174,8 +197,16 @@ export function computeSmartAiMatches({
   const occ = AI_CONCIERGE_OCCASIONS.find((o) => o.id === occasionId) || AI_CONCIERGE_OCCASIONS[0];
   const rec = AI_CONCIERGE_RECIPIENTS.find((r) => r.id === recipientId) || AI_CONCIERGE_RECIPIENTS[0];
 
-  const scored = products
-    .filter((p) => Number(p.soLuongTon ?? 15) > 0)
+  const inStockProducts = products.filter((p) => Number(p.soLuongTon ?? 15) > 0);
+  const condolencePool = inStockProducts.filter(isCondolenceProduct);
+  const candidatePool =
+    occasionId === 'tang-le'
+      ? condolencePool.length > 0
+        ? condolencePool
+        : inStockProducts
+      : inStockProducts.filter((p) => !isCondolenceProduct(p));
+
+  const scored = candidatePool
     .map((p) => {
       const text = `${p.tenSanPham || ''} ${p.moTa || ''} ${p.tongMauSac || ''} ${p.tenDanhMuc || ''}`.toLowerCase();
       const normTone = normalizeColorGroup(p.tongMauSac);

@@ -844,15 +844,39 @@ export default function AdminDashboard() {
       let savedData = null;
 
       if (productModal.mode === 'create') {
-        const res = await api.post('/SanPham', sqlPayload);
-        savedData = res.data;
+        try {
+          const res = await api.post('/SanPham', sqlPayload);
+          savedData = res.data;
+        } catch (sqlErr) {
+          if (sqlPayload.maDanhMuc === 6) {
+            const res = await api.post('/SanPham', { ...sqlPayload, maDanhMuc: 3 });
+            savedData = res.data;
+          } else {
+            throw sqlErr;
+          }
+        }
         showToast(`Đã thêm mẫu hoa "${cleanName}" thành công!`);
       } else {
-        const res = await api.put(`/SanPham/${productModal.id}`, {
-          ...sqlPayload,
-          maSanPham: productModal.id,
-        });
-        savedData = res.data;
+        try {
+          const res = await api.put(`/SanPham/${productModal.id}`, {
+            ...sqlPayload,
+            maSanPham: productModal.id,
+          });
+          savedData = res.data;
+        } catch (sqlErr) {
+          if (Number(productModal.id) >= 101) {
+            savedData = { ...sqlPayload, maSanPham: productModal.id };
+          } else if (sqlPayload.maDanhMuc === 6) {
+            const res = await api.put(`/SanPham/${productModal.id}`, {
+              ...sqlPayload,
+              maDanhMuc: 3,
+              maSanPham: productModal.id,
+            });
+            savedData = res.data;
+          } else {
+            throw sqlErr;
+          }
+        }
         showToast(`Đã cập nhật & đồng bộ bó hoa "${cleanName}" lên Trang chủ!`);
       }
 

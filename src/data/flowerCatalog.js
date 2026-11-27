@@ -10,6 +10,7 @@ export const CURATED_CATEGORIES = [
   { maDanhMuc: 3, tenDanhMuc: 'Lẵng hoa khai trương' },
   { maDanhMuc: 4, tenDanhMuc: 'Hộp hoa cao cấp' },
   { maDanhMuc: 5, tenDanhMuc: 'Hoa cưới cầm tay' },
+  { maDanhMuc: 6, tenDanhMuc: 'Hoa tang lễ' },
 ];
 
 // Chuẩn hóa tên loài hoa, danh mục, tông màu & ảnh thực tế cho 20 sản phẩm hiện có trong SQL Server
@@ -477,6 +478,66 @@ export const EXTRA_CURATED_PRODUCTS = [
     hinhAnhChinh: '/images/flowers/wedding-calla-lily.webp',
     moTa:
       'Bó hoa cưới cầm tay cô dâu tối giản đầy khí chất từ hoa loa kèn trắng Calla Lily nhập khẩu điểm hoa baby trắng, thắt ruy băng voan tinh tế.',
+  },
+  {
+    maSanPham: 117,
+    checkoutProxyId: 13,
+    tenSanPham: 'Kệ Hoa Tang Lễ Thành Kính Lan Trắng & Cúc Trắng',
+    loaiHoa: 'Lan Hồ Điệp Trắng, Hoa Ly Trắng & Cúc Trắng',
+    maDanhMuc: 6,
+    tenDanhMuc: 'Hoa tang lễ',
+    giaBan: 1250000,
+    soLuongTon: 10,
+    tongMauSac: 'Trắng',
+    danhMucTrangChu: ['tang-le', 'lan-ho-diep', 'thiet-ke'],
+    hinhAnhChinh: '/images/flowers/funeral-white-orchid-stand.jpg',
+    moTa:
+      'Kệ hoa tang lễ 2 tầng trang nghiêm kết từ lan hồ điệp trắng, hoa ly trắng, cúc trắng và lá trầu bà xanh mát, gửi trọn tấm lòng thành kính phân ưu cùng gia quyến.',
+  },
+  {
+    maSanPham: 118,
+    checkoutProxyId: 13,
+    tenSanPham: 'Vòng Hoa Tang Lễ Ly Trắng & Hồng Kem Trang Trọng',
+    loaiHoa: 'Hoa Ly Trắng, Hồng Kem Trắng & Cúc Trắng',
+    maDanhMuc: 6,
+    tenDanhMuc: 'Hoa tang lễ',
+    giaBan: 1480000,
+    soLuongTon: 8,
+    tongMauSac: 'Trắng',
+    danhMucTrangChu: ['tang-le', 'thiet-ke'],
+    hinhAnhChinh: '/images/flowers/funeral-lily-rose-wreath.jpg',
+    moTa:
+      'Vòng hoa viếng tang lễ thiết kế tròn đầy tinh khiết với hoa ly trắng, hoa hồng trắng kem và cúc trắng phối lá bạc eucalyptus thanh lịch trên giá gỗ trắng trang trọng.',
+  },
+  {
+    maSanPham: 119,
+    checkoutProxyId: 8,
+    tenSanPham: 'Kệ Hoa Chia Buồn Lan Hồ Điệp Tím Trắng Tưởng Nhớ',
+    loaiHoa: 'Lan Hồ Điệp Tím Trắng, Cát Tường Tím & Hồng Trắng',
+    maDanhMuc: 6,
+    tenDanhMuc: 'Hoa tang lễ',
+    giaBan: 1750000,
+    soLuongTon: 9,
+    tongMauSac: 'Tím',
+    danhMucTrangChu: ['tang-le', 'lan-ho-diep', 'thiet-ke'],
+    hinhAnhChinh: '/images/flowers/funeral-purple-orchid-stand.jpg',
+    moTa:
+      'Kệ hoa chia buồn cao cấp phối lan hồ điệp tím và trắng cùng hoa cát tường tím, hoa hồng trắng thanh tao, biểu trưng cho sự tri ân và tưởng nhớ sâu sắc.',
+  },
+  {
+    maSanPham: 120,
+    checkoutProxyId: 20,
+    tenSanPham: 'Giỏ Hoa Chia Buồn Cúc Vàng & Cúc Trắng Thành Tâm',
+    loaiHoa: 'Hoa Cúc Vàng, Cúc Trắng & Hồng Trắng',
+    maDanhMuc: 6,
+    tenDanhMuc: 'Hoa tang lễ',
+    giaBan: 650000,
+    soLuongTon: 15,
+    tongMauSac: 'Vàng',
+    danhMucTrangChu: ['tang-le', 'thiet-ke'],
+    hinhAnhChinh: '/images/flowers/funeral-yellow-chrysanthemum-basket.jpg',
+    moTa:
+      'Giỏ hoa chia buồn để bàn truyền thống kết hợp cúc vàng ấm áp, cúc trắng tinh khôi và hoa hồng trắng kèm nơ lụa trắng trang nhã, phù hợp viếng tại gia và bàn thờ gia tiên.',
   },
 ];
 

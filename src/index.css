@@ -494,7 +494,7 @@ input, select, textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 24px;
+  gap: clamp(12px, 1.45vw, 20px);
   height: 46px;
 }
 
@@ -706,8 +706,8 @@ input, select, textarea {
 
 .thx-occasions-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
   margin-top: 20px;
 }
 

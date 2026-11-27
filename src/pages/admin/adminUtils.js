@@ -6,6 +6,7 @@ export const FLOWER_CATEGORIES = [
   { id: 3, name: 'Lẵng hoa khai trương' },
   { id: 4, name: 'Hộp hoa cao cấp' },
   { id: 5, name: 'Hoa cưới cầm tay' },
+  { id: 6, name: 'Hoa tang lễ' },
 ];
 
 export const HOMEPAGE_NAV_CATEGORIES = [
@@ -13,6 +14,7 @@ export const HOMEPAGE_NAV_CATEGORIES = [
   { id: 'khai-truong', label: 'Hoa Khai Trương' },
   { id: 'lan-ho-diep', label: 'Lan Hồ Điệp' },
   { id: 'chu-de', label: 'Chủ Đề' },
+  { id: 'tang-le', label: 'Hoa Tang Lễ' },
   { id: 'thiet-ke', label: 'Thiết Kế' },
 ];
 

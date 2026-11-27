@@ -39,6 +39,7 @@ import {
   normalizeColorGroup,
   pushRecentlyViewedId,
   readRecentlyViewedIds,
+  isCondolenceProduct,
 } from '../utils/storeUtils';
 
 function buildFlowerSpecs(product) {
@@ -47,8 +48,11 @@ function buildFlowerSpecs(product) {
   const catId = Number(product?.maDanhMuc || 1);
   const price = Number(product?.giaBan || 0);
 
+  const isCondolence = isCondolenceProduct(product);
   let composition = `Hoa tươi chủ đạo ${tone.toLowerCase()}, kết hợp hoa lá phụ nhập khẩu và giấy gói lụa Hàn Quốc chống thấm.`;
-  if (name.includes('mẫu đơn')) {
+  if (isCondolence) {
+    composition = `Hoa tuyển chọn tông ${tone.toLowerCase()} (lan hồ điệp, hoa ly, hoa cúc, cát tường) phối lá xanh trang trọng, kèm ruy băng dải chia buồn trang nghiêm.`;
+  } else if (name.includes('mẫu đơn')) {
     composition =
       'Hoa mẫu đơn (Peony) nhập khẩu cánh dày kiêu sa, phối hoa mao lương, hoa thanh liễu và giấy gói lụa Hàn Quốc cao cấp.';
   } else if (name.includes('hướng dương')) {
@@ -107,7 +111,11 @@ function buildFlowerSpecs(product) {
   }
 
   let dimensions = 'Cao 55cm – 65cm × Rộng 40cm (Bó tiêu chuẩn)';
-  if (catId === 3 || name.includes('kệ') || name.includes('lẵng') || price >= 900000) {
+  if (isCondolence) {
+    dimensions = name.includes('giỏ')
+      ? 'Cao 42cm – 50cm × Rộng 38cm (Giỏ hoa chia buồn để bàn)'
+      : 'Cao 160cm – 180cm × Rộng 85cm (Kệ / Vòng hoa tang lễ trang trọng)';
+  } else if (catId === 3 || name.includes('kệ') || name.includes('lẵng') || price >= 900000) {
     dimensions = 'Cao 150cm – 170cm × Rộng 80cm (Kệ / Lẵng hoa quy mô lớn)';
   } else if (catId === 2 || catId === 4 || name.includes('giỏ') || name.includes('hộp')) {
     dimensions = 'Cao 40cm – 50cm × Rộng 35cm (Giỏ / Hộp hoa để bàn sang trọng)';
@@ -118,7 +126,9 @@ function buildFlowerSpecs(product) {
   return {
     composition,
     dimensions,
-    freshness: 'Tươi đẹp từ 3 – 5 ngày (tặng kèm gói dưỡng hoa chuyên dụng)',
+    freshness: isCondolence
+      ? 'Tươi đẹp từ 3 – 5 ngày (hỗ trợ in dải băng kính viếng & giao nhanh tận nơi)'
+      : 'Tươi đẹp từ 3 – 5 ngày (tặng kèm gói dưỡng hoa chuyên dụng)',
   };
 }
 
@@ -203,6 +213,7 @@ export default function ProductDetailPage() {
           .slice(0, 4);
         setRecentProducts(recentList);
 
+        const isCondolenceCurrent = isCondolenceProduct(currentSp);
         const targetTone = normalizeColorGroup(currentSp?.tongMauSac);
         const targetCat = Number(currentSp?.maDanhMuc || 0);
         const targetPrice = Number(currentSp?.giaBan || 0);
@@ -218,6 +229,9 @@ export default function ProductDetailPage() {
           if (targetPrice > 0 && Number(item.giaBan) > 0) {
             const diffRatio = Math.abs(Number(item.giaBan) - targetPrice) / targetPrice;
             if (diffRatio <= 0.3) calcScore += 0.05;
+          }
+          if (isCondolenceProduct(item) !== isCondolenceCurrent) {
+            calcScore -= 0.45;
           }
           return Math.min(0.96, Math.max(0.45, Number(calcScore.toFixed(2))));
         };
@@ -287,8 +301,16 @@ export default function ProductDetailPage() {
 
         if ((!recList || recList.length === 0) && allProducts.length > 1) {
           activeSource = 'Smart Attribute Matching';
-          recList = allProducts
-            .filter((p) => Number(p.maSanPham) !== Number(currentSp.maSanPham))
+          const sameContextPool = allProducts.filter(
+            (p) =>
+              Number(p.maSanPham) !== Number(currentSp.maSanPham) &&
+              isCondolenceProduct(p) === isCondolenceCurrent
+          );
+          const candidatePool =
+            sameContextPool.length > 0
+              ? sameContextPool
+              : allProducts.filter((p) => Number(p.maSanPham) !== Number(currentSp.maSanPham));
+          recList = candidatePool
             .map((p, idx) => ({ ...p, similarityScore: computeAttributeScore(p, idx) }))
             .sort((a, b) => b.similarityScore - a.similarityScore)
             .slice(0, 4);

@@ -31,6 +31,7 @@ export const SQL_CATEGORY_NAMES = {
   3: 'Lẵng hoa khai trương',
   4: 'Hộp hoa cao cấp',
   5: 'Hoa cưới cầm tay',
+  6: 'Hoa tang lễ',
 };
 
 // --- QUẢN LÝ PHIÊN ĐĂNG NHẬP THỐNG NHẤT ---
@@ -875,9 +876,10 @@ api.interceptors.response.use(
       }
     }
     if (/^\/?danhmuc\/?(\?.*)?$/.test(reqUrl)) {
-      if (!Array.isArray(response.data) || response.data.length === 0) {
-        response.data = CURATED_CATEGORIES;
-      }
+      const baseList = Array.isArray(response.data) ? response.data : [];
+      const existingIds = new Set(baseList.map((c) => Number(c.maDanhMuc)));
+      const extraCats = CURATED_CATEGORIES.filter((c) => !existingIds.has(Number(c.maDanhMuc)));
+      response.data = baseList.length > 0 ? [...baseList, ...extraCats] : CURATED_CATEGORIES;
     }
     return response;
   },

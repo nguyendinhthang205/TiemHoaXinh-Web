@@ -103,7 +103,14 @@ export default function SmartAiConcierge({ products = [] }) {
                   <button
                     key={occ.id}
                     type="button"
-                    onClick={() => setOccasionId(occ.id)}
+                    onClick={() => {
+                      setOccasionId(occ.id);
+                      if (occ.id === 'tang-le') {
+                        setRecipientId('condolence');
+                      } else if (recipientId === 'condolence') {
+                        setRecipientId('lover');
+                      }
+                    }}
                     className={`thx-ai-chip ${occasionId === occ.id ? 'active' : ''}`}
                   >
                     {occ.label}
