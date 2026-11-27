@@ -27,7 +27,11 @@ import api, {
   syncProductReviewsFromCloud,
   syncProductOverridesFromCloud,
   saveProductReview,
+  mergeProductOverride,
+  applyOverridesToProductList,
+  getOfflineFallbackProducts,
 } from '../services/api';
+import { getCuratedProductById } from '../data/flowerCatalog';
 import { useApp } from '../context/AppContext';
 import ProductCard from '../components/ProductCard';
 import {
@@ -150,23 +154,45 @@ export default function ProductDetailPage() {
       try {
         if (!silent) setLoading(true);
 
+        const numericId = Number(id);
+        const curatedLocal = getCuratedProductById(id);
+
         const [spRes, recRes, revRes, allSpRes] = await Promise.all([
-          api.get(`/SanPham/${id}`),
-          api.get(`/SanPham/${id}/recommendations`).catch(() => ({ data: {} })),
-          api.get(`/DanhGia/product/${id}`).catch(() => ({ data: [] })),
-          api.get('/SanPham').catch(() => ({ data: [] })),
+          curatedLocal
+            ? Promise.resolve({ data: mergeProductOverride(curatedLocal) })
+            : api.get(`/SanPham/${id}`).catch(() => {
+                const offlineItem = getOfflineFallbackProducts().find(
+                  (p) => Number(p.maSanPham) === numericId
+                );
+                return { data: offlineItem || null };
+              }),
+          curatedLocal
+            ? Promise.resolve({ data: {} })
+            : api.get(`/SanPham/${id}/recommendations`).catch(() => ({ data: {} })),
+          curatedLocal
+            ? Promise.resolve({ data: [] })
+            : api.get(`/DanhGia/product/${id}`).catch(() => ({ data: [] })),
+          api.get('/SanPham').catch(() => ({ data: getOfflineFallbackProducts() })),
         ]);
 
-        const currentSp = spRes.data;
+        const rawSp = spRes.data;
+        const currentSp = rawSp ? mergeProductOverride(rawSp) : null;
         setProduct(currentSp);
+        if (!currentSp) {
+          setRecommendations([]);
+          setRecentProducts([]);
+          return;
+        }
         if (!silent) {
           setQty(1);
           pushRecentlyViewedId(currentSp?.maSanPham ?? id);
         }
 
-        const allProducts = Array.isArray(allSpRes.data)
+        const rawAll = Array.isArray(allSpRes.data)
           ? allSpRes.data
           : allSpRes.data?.items || [];
+        const allProducts =
+          rawAll.length > 0 ? applyOverridesToProductList(rawAll) : getOfflineFallbackProducts();
 
         const recentIds = readRecentlyViewedIds().filter(
           (rid) => Number(rid) !== Number(id)
@@ -176,6 +202,25 @@ export default function ProductDetailPage() {
           .filter(Boolean)
           .slice(0, 4);
         setRecentProducts(recentList);
+
+        const targetTone = normalizeColorGroup(currentSp?.tongMauSac);
+        const targetCat = Number(currentSp?.maDanhMuc || 0);
+        const targetPrice = Number(currentSp?.giaBan || 0);
+
+        const computeAttributeScore = (item, idx = 0) => {
+          let calcScore = 0.56 - idx * 0.005;
+          if (currentSp?.tongMauSac && normalizeColorGroup(item.tongMauSac) === targetTone) {
+            calcScore += 0.25;
+          }
+          if (targetCat && Number(item.maDanhMuc) === targetCat) {
+            calcScore += 0.12;
+          }
+          if (targetPrice > 0 && Number(item.giaBan) > 0) {
+            const diffRatio = Math.abs(Number(item.giaBan) - targetPrice) / targetPrice;
+            if (diffRatio <= 0.3) calcScore += 0.05;
+          }
+          return Math.min(0.96, Math.max(0.45, Number(calcScore.toFixed(2))));
+        };
 
         const recData = recRes.data || {};
         let recList =
@@ -213,7 +258,7 @@ export default function ProductDetailPage() {
         const hasValidScores =
           recList.length > 0 && recList.every((x) => typeof x.similarityScore === 'number');
 
-        if (!hasValidScores || sourceLabel.toLowerCase().includes('fallback')) {
+        if (!curatedLocal && (!hasValidScores || sourceLabel.toLowerCase().includes('fallback'))) {
           try {
             const aiRes = await axios.get(`${AI_BASE_URL}/recommend/${id}`, { timeout: 4000 });
             const details =
@@ -225,7 +270,7 @@ export default function ProductDetailPage() {
               recList = details
                 .map((d) => {
                   const spId = d.maSanPham ?? d.id;
-                  const full = allProducts.find((p) => p.maSanPham === spId);
+                  const full = allProducts.find((p) => Number(p.maSanPham) === Number(spId));
                   const score = normalizeScore(
                     d.similarityScore ?? d.score ?? d.doTuongDong ?? 0.75
                   );
@@ -242,20 +287,16 @@ export default function ProductDetailPage() {
 
         if ((!recList || recList.length === 0) && allProducts.length > 1) {
           activeSource = 'Smart Attribute Matching';
-          recList = allProducts.filter((p) => p.maSanPham !== Number(id)).slice(0, 4);
+          recList = allProducts
+            .filter((p) => Number(p.maSanPham) !== Number(currentSp.maSanPham))
+            .map((p, idx) => ({ ...p, similarityScore: computeAttributeScore(p, idx) }))
+            .sort((a, b) => b.similarityScore - a.similarityScore)
+            .slice(0, 4);
         }
 
         recList = (recList || []).map((item, idx) => {
           if (typeof item.similarityScore === 'number') return item;
-          let calcScore = 0.64 - idx * 0.04;
-          if (currentSp?.tongMauSac && item.tongMauSac === currentSp.tongMauSac) {
-            calcScore += 0.22;
-          }
-          if (currentSp?.maDanhMuc && item.maDanhMuc === currentSp.maDanhMuc) {
-            calcScore += 0.1;
-          }
-          const clamped = Math.min(0.96, Math.max(0.45, Number(calcScore.toFixed(2))));
-          return { ...item, similarityScore: clamped };
+          return { ...item, similarityScore: computeAttributeScore(item, idx) };
         });
 
         setAiSourceLabel(activeSource);
@@ -264,6 +305,8 @@ export default function ProductDetailPage() {
         const rawSrvReviews = Array.isArray(revRes.data) ? revRes.data : [];
         serverReviewsRef.current = rawSrvReviews;
         setReviews(getMergedProductReviews(id, rawSrvReviews));
+      } catch {
+        setProduct(null);
       } finally {
         if (!silent) setLoading(false);
       }

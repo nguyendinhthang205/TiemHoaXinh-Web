@@ -3,10 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Trash2,
   ShoppingBag,
-  QrCode,
   CheckCircle,
   AlertCircle,
-  X,
   Truck,
   Store,
   Ticket,
@@ -23,6 +21,7 @@ import api, {
 } from '../services/api';
 import { useApp } from '../context/AppContext';
 import { STORE_INFO } from '../utils/storeUtils';
+import VietQrPaymentModal from '../components/VietQrPaymentModal';
 
 const SHIPPING_RATE_PER_KM = STORE_INFO.shippingRatePerKm;
 const SHOP_PICKUP_ADDRESS = STORE_INFO.address;
@@ -325,12 +324,18 @@ export default function CartPage() {
       return;
     }
 
-    const orderedSnapshot = cartItems.map((it) => ({
-      maSanPham: it.maSanPham,
-      tenSanPham: it.tenSanPham,
-      giaBan: it.giaBan || it.donGia || 0,
-      soLuong: it.soLuong || 1,
-    }));
+    const orderedSnapshot = cartItems.map((it) => {
+      const rawImg = it.hinhAnhChinh || it.anhChinh || '';
+      return {
+        maSanPham: it.maSanPham,
+        tenSanPham: it.tenSanPham,
+        giaBan: it.giaBan || it.donGia || 0,
+        soLuong: it.soLuong || 1,
+        ...(rawImg && !String(rawImg).startsWith('data:image/')
+          ? { hinhAnhChinh: rawImg }
+          : {}),
+      };
+    });
 
     const finalAddress =
       deliveryMethod === 'pickup'
@@ -377,13 +382,20 @@ export default function CartPage() {
       setSubmitting(true);
       const hasServerCartItem = cartItems.some((it) => !it.isCuratedLocal);
       if (!hasServerCartItem && curatedLocalItems.length > 0) {
-        const proxyId = curatedLocalItems[0].checkoutProxyId || 24;
-        await api
-          .post('/GioHang', {
-            maSanPham: proxyId,
-            soLuong: curatedLocalItems.reduce((s, it) => s + Number(it.soLuong || 1), 0),
-          })
-          .catch(() => {});
+        const proxyCandidates = Array.from(
+          new Set([curatedLocalItems[0].checkoutProxyId || 24, 24, 1, 2, 3].filter(Boolean))
+        );
+        for (const candidateId of proxyCandidates) {
+          try {
+            await api.post('/GioHang', {
+              maSanPham: candidateId,
+              soLuong: 1,
+            });
+            break;
+          } catch {
+            // Thử sản phẩm đại diện khác nếu hết tồn kho backend
+          }
+        }
       }
 
       const res = await api.post('/DonHang', payload);
@@ -407,6 +419,7 @@ export default function CartPage() {
         paymentMethod: phuongThucThanhToan,
         isPaid: false,
         grandTotal: finalMoney,
+        orderedItems: orderedSnapshot,
       });
 
       if (phuongThucThanhToan === 'VietQR') {
@@ -1129,61 +1142,12 @@ export default function CartPage() {
       )}
 
       {/* Cửa sổ quét mã VietQR */}
-      {qrOrder && (
-        <div className="modal-backdrop">
-          <div className="modal-box" style={{ textAlign: 'center', position: 'relative' }}>
-            <button
-              type="button"
-              onClick={handleCloseQrModal}
-              title="Đóng cửa sổ thanh toán"
-              style={{
-                position: 'absolute',
-                top: 14,
-                right: 14,
-                width: 34,
-                height: 34,
-                borderRadius: '50%',
-                background: '#f3f4f6',
-                color: '#4b5563',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <X size={18} />
-            </button>
-
-            <QrCode size={36} color="#e11d48" style={{ marginBottom: 8 }} />
-            <h2>Quét Mã VietQR Để Thanh Toán</h2>
-            <p style={{ color: '#6b7280', fontSize: '0.9rem', margin: '8px 0 16px' }}>
-              Đơn hàng <b>#{qrOrder.maDonHang}</b> &bull; Số tiền:{' '}
-              <b className="tabular-nums" style={{ color: '#e11d48' }}>
-                {formatVND(qrOrder.tongTien)}
-              </b>
-            </p>
-            <img
-              src={qrOrder.qrUrl}
-              alt="VietQR VietinBank - NGUYEN DINH THANG - 105880014341"
-              style={{
-                width: '100%',
-                maxWidth: 290,
-                height: 'auto',
-                borderRadius: 16,
-                border: '1px solid var(--border)',
-                marginBottom: 18,
-                display: 'block',
-                marginInline: 'auto',
-              }}
-            />
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-              <button type="button" onClick={handleConfirmPaid} className="btn btn-sage">
-                <CheckCircle size={18} />
-                <span>Tôi đã chuyển khoản xong</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <VietQrPaymentModal
+        order={qrOrder}
+        onClose={handleCloseQrModal}
+        onConfirmPaid={handleConfirmPaid}
+        showToast={showToast}
+      />
 
       {/* Cửa sổ Đánh giá bó hoa ngay sau khi đặt hàng thành công */}
       {postOrderReviewData && (

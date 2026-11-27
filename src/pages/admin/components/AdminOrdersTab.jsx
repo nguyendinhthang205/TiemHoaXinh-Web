@@ -613,10 +613,11 @@ export default function AdminOrdersTab({
         );
         const grandTotal =
           meta.grandTotal ?? selectedOrder.tongThanhToan ?? selectedOrder.tongTien ?? itemsSubtotal;
+        const discountAmount = Number(meta.discountAmount || 0);
         const shippingFee =
           typeof meta.shippingFee === 'number'
             ? meta.shippingFee
-            : Math.max(0, grandTotal - itemsSubtotal);
+            : Math.max(0, grandTotal + discountAmount - itemsSubtotal);
 
         return (
           <div className="modal-backdrop">
@@ -865,6 +866,12 @@ export default function AdminOrdersTab({
                     {shippingFee === 0 ? 'Miễn phí (0 đ)' : formatVND(shippingFee)}
                   </b>
                 </div>
+                {discountAmount > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#15803d' }}>
+                    <span>Ưu đãi {meta.voucherCode ? `(${meta.voucherCode})` : ''}:</span>
+                    <b className="tabular-nums">-{formatVND(discountAmount)}</b>
+                  </div>
+                )}
                 <div
                   style={{
                     display: 'flex',

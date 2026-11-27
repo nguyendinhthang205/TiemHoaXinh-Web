@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import {
   BrowserRouter,
   Routes,
@@ -15,12 +15,30 @@ import ScrollToTop from './components/ScrollToTop';
 import CustomerChatWidget from './components/CustomerChatWidget';
 import WishlistDrawer from './components/WishlistDrawer';
 import HomePage from './pages/HomePage';
-import ShopPage from './pages/ShopPage';
-import ProductDetailPage from './pages/ProductDetailPage';
-import CartPage from './pages/CartPage';
-import LoginPage from './pages/LoginPage';
-import MyOrdersPage from './pages/MyOrdersPage';
-import AdminDashboard from './pages/admin/AdminDashboard';
+
+const ShopPage = lazy(() => import('./pages/ShopPage'));
+const ProductDetailPage = lazy(() => import('./pages/ProductDetailPage'));
+const CartPage = lazy(() => import('./pages/CartPage'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const MyOrdersPage = lazy(() => import('./pages/MyOrdersPage'));
+const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
+
+function RouteLoadingFallback() {
+  return (
+    <div className="container" style={{ marginTop: 28, marginBottom: 48 }}>
+      <div className="panel" style={{ padding: 36, textAlign: 'center', color: '#6b7280' }}>
+        <div
+          className="thx-skeleton"
+          style={{ height: 24, width: '36%', margin: '0 auto 14px', borderRadius: 10 }}
+        />
+        <div
+          className="thx-skeleton"
+          style={{ height: 140, width: '100%', borderRadius: 16 }}
+        />
+      </div>
+    </div>
+  );
+}
 
 function AppLayout() {
   const location = useLocation();
@@ -43,17 +61,19 @@ function AppLayout() {
 
       <main style={{ flex: 1 }}>
         <ErrorBoundary>
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/shop" element={<ShopPage />} />
-            <Route path="/product/:id" element={<ProductDetailPage />} />
-            <Route path="/products/:id" element={<ProductDetailPage />} />
-            <Route path="/cart" element={<CartPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/my-orders" element={<MyOrdersPage />} />
-            <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/shop" element={<ShopPage />} />
+              <Route path="/product/:id" element={<ProductDetailPage />} />
+              <Route path="/products/:id" element={<ProductDetailPage />} />
+              <Route path="/cart" element={<CartPage />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/my-orders" element={<MyOrdersPage />} />
+              <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
         </ErrorBoundary>
       </main>
 

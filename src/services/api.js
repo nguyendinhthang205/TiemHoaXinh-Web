@@ -173,8 +173,11 @@ function isSameOrderMetaItem(a, b) {
     Boolean(a.isPaid) === Boolean(b.isPaid) &&
     (a.deliveryMethod || '') === (b.deliveryMethod || '') &&
     Number(a.shippingFee || 0) === Number(b.shippingFee || 0) &&
+    Number(a.discountAmount || 0) === Number(b.discountAmount || 0) &&
+    (a.voucherCode || '') === (b.voucherCode || '') &&
     Number(a.grandTotal || 0) === Number(b.grandTotal || 0) &&
-    Number(a.updatedAt || 0) === Number(b.updatedAt || 0)
+    Number(a.updatedAt || 0) === Number(b.updatedAt || 0) &&
+    JSON.stringify(a.orderedItems || []) === JSON.stringify(b.orderedItems || [])
   );
 }
 
@@ -331,7 +334,11 @@ export async function syncOrderMetaFromCloud() {
       const rItem = remoteMeta[orderId];
       const lTime = Number(lItem.updatedAt || 0);
       const rTime = Number(rItem?.updatedAt || 0);
-      if ((!rItem && (lItem.statusOverride || lItem.deleted)) || lTime > rTime) {
+      if (
+        (!rItem &&
+          (lItem.statusOverride || lItem.deleted || lItem.orderedItems?.length)) ||
+        lTime > rTime
+      ) {
         const stamped = { ...lItem, updatedAt: lTime || Date.now() };
         merged[orderId] = stamped;
         remoteMeta[orderId] = stamped;
@@ -395,6 +402,35 @@ export async function writeOrderMeta(orderId, patch) {
   }
 
   return localCurrent;
+}
+
+export function resolveOrderDisplayItems(backendItems, meta = {}, productMap = {}) {
+  const snapshot = Array.isArray(meta?.orderedItems) ? meta.orderedItems : [];
+  const sourceItems =
+    snapshot.length > 0 ? snapshot : Array.isArray(backendItems) ? backendItems : [];
+
+  return sourceItems.map((it) => {
+    const prod = productMap[it.maSanPham] || getCuratedProductById(it.maSanPham) || {};
+    const qty = Number(it.soLuong ?? 1) || 1;
+    const unitPrice =
+      Number(it.donGia) ||
+      Number(it.giaLucMua) ||
+      Number(it.giaBan) ||
+      (Number(it.thanhTien) > 0 ? Number(it.thanhTien) / qty : 0) ||
+      Number(prod.giaBan) ||
+      0;
+    const flowerName =
+      it.tenSanPham || prod.tenSanPham || `Bó hoa #${it.maSanPham}`;
+
+    return {
+      ...prod,
+      ...it,
+      tenSanPham: flowerName,
+      soLuong: qty,
+      _unitPrice: unitPrice,
+      _lineTotal: unitPrice * qty,
+    };
+  });
 }
 
 export async function writeOrdersDeletedBatch(orderIds) {
@@ -851,10 +887,13 @@ api.interceptors.response.use(
     if (method === 'get') {
       const detailMatch = reqUrl.match(/^\/?sanpham\/(\d+)\/?$/);
       if (detailMatch) {
-        const curated = getCuratedProductById(detailMatch[1]);
-        if (curated) {
+        const numId = Number(detailMatch[1]);
+        const offlineItem =
+          getCuratedProductById(numId) ||
+          getOfflineFallbackProducts().find((p) => Number(p.maSanPham) === numId);
+        if (offlineItem) {
           return Promise.resolve({
-            data: mergeProductOverride(curated),
+            data: mergeProductOverride(offlineItem),
             status: 200,
             statusText: 'OK',
             headers: {},

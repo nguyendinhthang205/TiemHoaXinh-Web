@@ -26,6 +26,7 @@ import api, {
   syncOrderMetaFromCloud,
   writeOrderMeta,
   writeOrdersDeletedBatch,
+  resolveOrderDisplayItems,
 } from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import {
@@ -666,27 +667,7 @@ export default function AdminDashboard() {
         // Dùng dữ liệu sẵn có
       }
 
-      const enrichedItems = (items || []).map((it) => {
-        const prod = productMap[it.maSanPham] || {};
-        const qty = Number(it.soLuong ?? 1) || 1;
-        const rawUnit =
-          Number(it.donGia) ||
-          Number(it.giaLucMua) ||
-          Number(it.giaBan) ||
-          (Number(it.thanhTien) > 0 ? Number(it.thanhTien) / qty : 0) ||
-          Number(prod.giaBan) ||
-          0;
-        const flowerName =
-          it.tenSanPham || prod.tenSanPham || `Bó hoa #${it.maSanPham}`;
-        return {
-          ...prod,
-          ...it,
-          tenSanPham: flowerName,
-          soLuong: qty,
-          _unitPrice: rawUnit,
-          _lineTotal: rawUnit * qty,
-        };
-      });
+      const enrichedItems = resolveOrderDisplayItems(items, meta, productMap);
 
       setSelectedOrder({
         ...detailObj,

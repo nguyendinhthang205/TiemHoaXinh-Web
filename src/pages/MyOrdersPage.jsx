@@ -9,8 +9,6 @@ import {
   Gift,
   QrCode,
   XCircle,
-  CheckCircle,
-  X,
   User,
   Truck,
   Store,
@@ -23,9 +21,11 @@ import api, {
   readLocalOrderMeta,
   syncOrderMetaFromCloud,
   writeOrderMeta,
+  resolveOrderDisplayItems,
 } from '../services/api';
 import { useApp } from '../context/AppContext';
 import ConfirmModal from '../components/ConfirmModal';
+import VietQrPaymentModal from '../components/VietQrPaymentModal';
 
 function extractCustomerRawStatus(order, meta = {}) {
   if (meta.statusOverride) return meta.statusOverride;
@@ -546,31 +546,20 @@ export default function MyOrdersPage() {
                 )}
 
                 {/* Danh sách bó hoa trong đơn */}
-                {order._items && order._items.length > 0 && (
-                  <div
-                    style={{
-                      padding: '12px 0',
-                      borderBottom: '1px solid #f3f4f6',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 10,
-                    }}
-                  >
-                    {order._items.map((item, idx) => {
-                      const prod = productMap[item.maSanPham] || {};
-                      const quantity = item.soLuong ?? 1;
-                      const unitPrice =
-                        item.donGia ??
-                        item.giaLucMua ??
-                        item.giaBan ??
-                        (item.thanhTien && quantity ? item.thanhTien / quantity : null) ??
-                        prod.giaBan ??
-                        0;
-                      const flowerName =
-                        item.tenSanPham || prod.tenSanPham || `Sản phẩm #${item.maSanPham}`;
-                      const mergedItem = { ...prod, ...item, tenSanPham: flowerName };
-
-                      return (
+                {(() => {
+                  const displayItems = resolveOrderDisplayItems(order._items, meta, productMap);
+                  if (displayItems.length === 0) return null;
+                  return (
+                    <div
+                      style={{
+                        padding: '12px 0',
+                        borderBottom: '1px solid #f3f4f6',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 10,
+                      }}
+                    >
+                      {displayItems.map((item, idx) => (
                         <div
                           key={item.maSanPham ?? idx}
                           style={{
@@ -582,8 +571,8 @@ export default function MyOrdersPage() {
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                             <img
-                              src={getFlowerImage(mergedItem)}
-                              alt={flowerName}
+                              src={getFlowerImage(item)}
+                              alt={item.tenSanPham}
                               style={{
                                 width: 54,
                                 height: 54,
@@ -597,21 +586,21 @@ export default function MyOrdersPage() {
                                 to={`/product/${item.maSanPham}`}
                                 style={{ fontWeight: 600, fontSize: '0.94rem', color: '#181316' }}
                               >
-                                {flowerName}
+                                {item.tenSanPham}
                               </Link>
                               <div style={{ fontSize: '0.82rem', color: '#6b7280' }}>
-                                Số lượng: <b>{quantity}</b> bó × {formatVND(unitPrice)}
+                                Số lượng: <b>{item.soLuong}</b> bó × {formatVND(item._unitPrice)}
                               </div>
                             </div>
                           </div>
                           <div className="tabular-nums" style={{ fontWeight: 700, color: '#374151' }}>
-                            {formatVND(unitPrice * quantity)}
+                            {formatVND(item._lineTotal)}
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  );
+                })()}
 
                 {/* Thông tin giao hàng, lời chúc & trạng thái thanh toán */}
                 <div className="thx-order-footer-grid">
@@ -697,6 +686,13 @@ export default function MyOrdersPage() {
                       </div>
                     )}
 
+                    {Number(meta.discountAmount) > 0 && (
+                      <div style={{ fontSize: '0.81rem', color: '#15803d', fontWeight: 600 }}>
+                        Đã giảm voucher {meta.voucherCode ? `(${meta.voucherCode})` : ''}: -
+                        {formatVND(meta.discountAmount)}
+                      </div>
+                    )}
+
                     <div style={{ fontSize: '0.9rem', color: '#6b7280' }}>
                       Tổng thanh toán:{' '}
                       <span
@@ -715,73 +711,20 @@ export default function MyOrdersPage() {
       )}
 
       {/* Modal VietQR */}
-      {qrOrder && (
-        <div className="modal-backdrop">
-          <div className="modal-box" style={{ textAlign: 'center', position: 'relative' }}>
-            <button
-              type="button"
-              onClick={() => setQrOrder(null)}
-              title="Đóng cửa sổ"
-              style={{
-                position: 'absolute',
-                top: 14,
-                right: 14,
-                width: 34,
-                height: 34,
-                borderRadius: '50%',
-                background: '#f3f4f6',
-                color: '#4b5563',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <X size={18} />
-            </button>
-
-            <QrCode size={36} color="#e11d48" style={{ marginBottom: 8 }} />
-            <h2>Quét Mã VietQR Để Thanh Toán</h2>
-            <p style={{ color: '#6b7280', fontSize: '0.9rem', margin: '8px 0 16px' }}>
-              Đơn hàng <b>#{qrOrder.maDonHang}</b> &bull; Số tiền:{' '}
-              <b className="tabular-nums" style={{ color: '#e11d48' }}>
-                {formatVND(qrOrder.tongTien)}
-              </b>
-            </p>
-            <img
-              src={qrOrder.qrUrl}
-              alt="VietQR VietinBank - NGUYEN DINH THANG - 105880014341"
-              style={{
-                width: '100%',
-                maxWidth: 290,
-                height: 'auto',
-                borderRadius: 16,
-                border: '1px solid var(--border)',
-                marginBottom: 18,
-                display: 'block',
-                marginInline: 'auto',
-              }}
-            />
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-              <button
-                type="button"
-                onClick={async () => {
-                  const nextMeta = await writeOrderMeta(qrOrder.maDonHang, {
-                    isPaid: true,
-                    paymentMethod: 'VietQR',
-                  });
-                  setOrderMetaMap(nextMeta);
-                  setQrOrder(null);
-                  showToast('Đã xác nhận thanh toán online qua web (VietQR)!');
-                }}
-                className="btn btn-sage"
-              >
-                <CheckCircle size={18} />
-                <span>Tôi đã chuyển khoản xong</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <VietQrPaymentModal
+        order={qrOrder}
+        onClose={() => setQrOrder(null)}
+        onConfirmPaid={async () => {
+          const nextMeta = await writeOrderMeta(qrOrder.maDonHang, {
+            isPaid: true,
+            paymentMethod: 'VietQR',
+          });
+          setOrderMetaMap(nextMeta);
+          setQrOrder(null);
+          showToast('Đã xác nhận thanh toán online qua web (VietQR)!');
+        }}
+        showToast={showToast}
+      />
 
       <ConfirmModal
         open={Boolean(confirmCancelOrderId)}
